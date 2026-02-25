@@ -17,16 +17,17 @@ A lightweight **FastAPI** web application for placing Binance USDT-M Futures lim
 
 ## Order Logic
 
-| Parameter     | Value                          |
-|---------------|-------------------------------|
-| Symbol        | `BTCUSDT`                     |
-| Order type    | `LIMIT` (entry)               |
-| Take Profit   | `TAKE_PROFIT_MARKET` (±1000)  |
-| Stop Loss     | `STOP_MARKET` (±400)          |
-| Working type  | `MARK_PRICE`                  |
-| Close mode    | `closePosition=true`          |
+| Parameter    | Value                        |
+| ------------ | ---------------------------- |
+| Symbol       | `BTCUSDT`                    |
+| Order type   | `LIMIT` (entry)              |
+| Take Profit  | `TAKE_PROFIT_MARKET` (±1000) |
+| Stop Loss    | `STOP_MARKET` (±400)         |
+| Working type | `MARK_PRICE`                 |
+| Close mode   | `closePosition=true`         |
 
 Quantity is calculated as:
+
 ```
 quantity = AMOUNT × LEVERAGE / LIMIT_PRICE
 ```
@@ -121,6 +122,10 @@ keys.py
 __pycache__/
 *.pyc
 .env
+```
+
+```bash
+Invoke-RestMethod -Uri https://api.ipify.org
 ```
 
 ---
