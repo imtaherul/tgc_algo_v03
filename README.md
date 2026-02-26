@@ -1,4 +1,4 @@
-# ₿ BTC Futures Trader
+# ₿ TGC Algo
 
 A lightweight **FastAPI** web application for placing Binance USDT-M Futures limit orders with automatic Take Profit and Stop Loss — straight from your browser.
 
@@ -22,7 +22,7 @@ A lightweight **FastAPI** web application for placing Binance USDT-M Futures lim
 | Symbol       | `BTCUSDT`                    |
 | Order type   | `LIMIT` (entry)              |
 | Take Profit  | `TAKE_PROFIT_MARKET` (±1000) |
-| Stop Loss    | `STOP_MARKET` (±400)         |
+| Stop Loss    | `STOP_MARKET` (±300)         |
 | Working type | `MARK_PRICE`                 |
 | Close mode   | `closePosition=true`         |
 
