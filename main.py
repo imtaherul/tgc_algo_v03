@@ -6,9 +6,10 @@ import time
 import logging
 import asyncio
 import json
+import threading
 from datetime import datetime
 from fastapi import FastAPI, Request, Form
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from binance.um_futures import UMFutures
 from binance.error import ClientError
@@ -23,27 +24,30 @@ templates = Jinja2Templates(directory="templates")
 # ── In-memory log store ────────────────────────────────────────
 _terminal_logs: list[dict] = []
 _log_subscribers: list[asyncio.Queue] = []
+_event_loop: asyncio.AbstractEventLoop = None
 
 def push_log(level: str, msg: str):
     entry = {"ts": datetime.now().strftime("%H:%M:%S"), "level": level, "msg": msg}
     _terminal_logs.append(entry)
     if len(_terminal_logs) > 200:
         _terminal_logs.pop(0)
-    for q in list(_log_subscribers):
-        try:
-            q.put_nowait(entry)
-        except asyncio.QueueFull:
-            pass
+    # Thread-safe broadcast to SSE subscribers
+    if _event_loop and not _event_loop.is_closed():
+        for q in list(_log_subscribers):
+            try:
+                _event_loop.call_soon_threadsafe(q.put_nowait, entry)
+            except Exception:
+                pass
 
 # ── Shared config ──────────────────────────────────────────────
-USE_TESTNET  = False
-SYMBOL       = "BTCUSDT"
-LEVERAGE     = 10
-AMOUNT       = 2000.0
-TP_OFFSET    = 1000.0
-SL_OFFSET    = 300.0
-WORKING_TYPE = "MARK_PRICE"
-POLL_INTERVAL = 10
+USE_TESTNET   = False
+SYMBOL        = "BTCUSDT"
+LEVERAGE      = 10
+AMOUNT        = 2000.0
+TP_OFFSET     = 1000.0
+SL_OFFSET     = 400.0
+WORKING_TYPE  = "MARK_PRICE"
+POLL_INTERVAL = 5
 
 def get_client() -> UMFutures:
     if USE_TESTNET:
@@ -67,95 +71,130 @@ def tpl_ctx(request: Request, extra: dict = {}) -> dict:
         **extra,
     }
 
+# ── Order execution (runs in background thread) ────────────────
 def run_order(side: str, limit_price: float, amount: float,
-              tp_offset: float, sl_offset: float) -> dict:
+              tp_offset: float, sl_offset: float):
     client = get_client()
     quantity    = amount * LEVERAGE / limit_price
     take_profit = limit_price + tp_offset if side == "BUY" else limit_price - tp_offset
     stop_loss   = limit_price - sl_offset if side == "BUY" else limit_price + sl_offset
-    log = []
 
-    push_log("INFO", "─" * 40)
-    push_log("INFO", f"New {side} order initiated")
-    push_log("INFO", f"Symbol: {SYMBOL} | Leverage: {LEVERAGE}x | Margin: ${amount} | TP±{tp_offset} | SL±{sl_offset}")
+    push_log("INFO",  "─" * 44)
+    push_log("INFO",  f"▶ Starting {side} order sequence")
+    push_log("INFO",  f"  Symbol   : {SYMBOL}")
+    push_log("INFO",  f"  Margin   : ${amount} USDT  |  Leverage: {LEVERAGE}x")
+    push_log("INFO",  f"  Entry    : ${fmt_price(limit_price)}")
+    push_log("INFO",  f"  Quantity : {fmt_qty(quantity)} BTC")
+    push_log("INFO",  f"  TP target: ${fmt_price(take_profit)}  (+{tp_offset})")
+    push_log("INFO",  f"  SL target: ${fmt_price(stop_loss)}  (-{sl_offset})")
+    push_log("INFO",  "─" * 44)
 
-    # Set leverage
-    resp = client.change_leverage(symbol=SYMBOL, leverage=LEVERAGE)
-    msg = f"Leverage set to {resp['leverage']}x for {resp['symbol']}"
-    log.append(f"✓ {msg}"); push_log("SUCCESS", msg)
+    try:
+        # ── Step 1: Set leverage ───────────────────────────────
+        push_log("INFO", "⚙  [1/4] Setting leverage...")
+        resp = client.change_leverage(symbol=SYMBOL, leverage=LEVERAGE)
+        push_log("SUCCESS", f"✓  Leverage set to {resp['leverage']}x for {resp['symbol']}")
 
-    # Entry limit order
-    push_log("INFO", f"Placing LIMIT {side} @ {fmt_price(limit_price)} | qty: {fmt_qty(quantity)}")
-    entry = client.new_order(
-        symbol=SYMBOL, side=side, type="LIMIT",
-        timeInForce="GTC", quantity=fmt_qty(quantity), price=fmt_price(limit_price),
-    )
-    msg = f"LIMIT {side} placed — orderId: {entry['orderId']}"
-    log.append(f"✓ {msg}"); push_log("SUCCESS", msg)
+        # ── Step 2: Place limit entry ──────────────────────────
+        push_log("INFO", f"📤 [2/4] Placing LIMIT {side} @ ${fmt_price(limit_price)} | qty: {fmt_qty(quantity)}")
+        entry = client.new_order(
+            symbol=SYMBOL, side=side, type="LIMIT",
+            timeInForce="GTC",
+            quantity=fmt_qty(quantity),
+            price=fmt_price(limit_price),
+        )
+        entry_id = entry["orderId"]
+        push_log("SUCCESS", f"✓  Entry order placed — orderId: {entry_id}")
 
-    # Wait for fill
-    push_log("INFO", f"Waiting for order {entry['orderId']} to fill...")
-    log.append(f"⏳ Waiting for order {entry['orderId']} to fill...")
-    while True:
-        order = client.query_order(symbol=SYMBOL, orderId=entry["orderId"])
-        status = order["status"]
-        push_log("INFO", f"Order {entry['orderId']} status: {status}")
-        if status == "FILLED":
-            msg = f"Order {entry['orderId']} FILLED!"
-            log.append(f"✓ {msg}"); push_log("SUCCESS", msg); break
-        if status in ("CANCELED", "REJECTED", "EXPIRED"):
-            push_log("ERROR", f"Order ended with status: {status}")
-            raise RuntimeError(f"Order ended with status: {status}")
-        time.sleep(POLL_INTERVAL)
+        # ── Step 3: Wait for fill ──────────────────────────────
+        push_log("INFO", f"⏳ [3/4] Waiting for order {entry_id} to fill...")
+        attempt = 0
+        while True:
+            attempt += 1
+            order  = client.query_order(symbol=SYMBOL, orderId=entry_id)
+            status = order["status"]
+            filled = float(order.get("executedQty", 0))
+            push_log("INFO", f"   Poll #{attempt} → status: {status}  filled: {filled}/{fmt_qty(quantity)} BTC")
 
-    # Take profit — NOTE: TAKE_PROFIT_MARKET does NOT accept timeInForce
-    push_log("INFO", f"Placing TAKE_PROFIT_MARKET {exit_side(side)} @ {fmt_price(take_profit)}")
-    tp = client.new_order(
-        symbol=SYMBOL,
-        side=exit_side(side),
-        type="TAKE_PROFIT_MARKET",
-        stopPrice=fmt_price(take_profit),
-        closePosition="true",
-        workingType=WORKING_TYPE,
-        priceProtect="TRUE",
-    )
-    msg = f"TAKE_PROFIT_MARKET placed @ {fmt_price(take_profit)} — orderId: {tp['orderId']}"
-    log.append(f"✓ {msg}"); push_log("SUCCESS", msg)
+            if status == "FILLED":
+                push_log("SUCCESS", f"✓  Order FILLED! avg price: ${order.get('avgPrice','?')}")
+                break
+            if status in ("CANCELED", "REJECTED", "EXPIRED"):
+                push_log("ERROR", f"✗  Order ended with status: {status} — aborting")
+                return
+            if status == "PARTIALLY_FILLED":
+                push_log("WARN", f"   Partially filled ({filled} BTC) — still waiting...")
 
-    # Stop loss — NOTE: STOP_MARKET does NOT accept timeInForce
-    push_log("INFO", f"Placing STOP_MARKET {exit_side(side)} @ {fmt_price(stop_loss)}")
-    sl = client.new_order(
-        symbol=SYMBOL,
-        side=exit_side(side),
-        type="STOP_MARKET",
-        stopPrice=fmt_price(stop_loss),
-        closePosition="true",
-        workingType=WORKING_TYPE,
-        priceProtect="TRUE",
-    )
-    msg = f"STOP_MARKET placed @ {fmt_price(stop_loss)} — orderId: {sl['orderId']}"
-    log.append(f"✓ {msg}"); push_log("SUCCESS", msg)
+            push_log("INFO", f"   Next poll in {POLL_INTERVAL}s...")
+            time.sleep(POLL_INTERVAL)
 
-    push_log("SUCCESS", f"All orders placed! Entry:{entry['orderId']} TP:{tp['orderId']} SL:{sl['orderId']}")
-    push_log("INFO", "─" * 40)
+        # ── Step 4: Place TP + SL via /fapi/v1/algoOrder (CONDITIONAL) ──
+        # UMFutures has no wrapper for this endpoint — call it directly via sign_request
+        push_log("INFO", "📤 [4/4] Placing Take Profit & Stop Loss via Algo Order API...")
 
-    return {
-        "success": True, "log": log,
-        "entry_id": entry["orderId"], "tp_id": tp["orderId"], "sl_id": sl["orderId"],
-        "tp_price": fmt_price(take_profit), "sl_price": fmt_price(stop_loss),
-        "qty": fmt_qty(quantity),
-    }
+        tp_exec = take_profit - 5  if side == "BUY" else take_profit + 5
+        sl_exec = stop_loss  - 10  if side == "BUY" else stop_loss  + 10
+
+        push_log("INFO", f"   → TP: CONDITIONAL/TAKE_PROFIT {exit_side(side)} | trigger: ${fmt_price(take_profit)} | exec: ${fmt_price(tp_exec)}")
+        tp = client.sign_request("POST", "/fapi/v1/algoOrder", {
+            "symbol":       SYMBOL,
+            "side":         exit_side(side),
+            "algoType":     "CONDITIONAL",
+            "type":         "TAKE_PROFIT",
+            "quantity":     fmt_qty(quantity),
+            "price":        fmt_price(tp_exec),
+            "triggerPrice": fmt_price(take_profit),
+            "timeInForce":  "GTC",
+            "workingType":  WORKING_TYPE,
+            "reduceOnly":   "true",
+        })
+        tp_id = tp.get("algoId", "?")
+        push_log("SUCCESS", f"✓  Take Profit placed | trigger: ${fmt_price(take_profit)} exec: ${fmt_price(tp_exec)} — algoId: {tp_id}")
+
+        push_log("INFO", f"   → SL: CONDITIONAL/STOP {exit_side(side)} | trigger: ${fmt_price(stop_loss)} | exec: ${fmt_price(sl_exec)}")
+        sl = client.sign_request("POST", "/fapi/v1/algoOrder", {
+            "symbol":       SYMBOL,
+            "side":         exit_side(side),
+            "algoType":     "CONDITIONAL",
+            "type":         "STOP",
+            "quantity":     fmt_qty(quantity),
+            "price":        fmt_price(sl_exec),
+            "triggerPrice": fmt_price(stop_loss),
+            "timeInForce":  "GTC",
+            "workingType":  WORKING_TYPE,
+            "reduceOnly":   "true",
+        })
+        sl_id = sl.get("algoId", "?")
+        push_log("SUCCESS", f"✓  Stop Loss placed   | trigger: ${fmt_price(stop_loss)} exec: ${fmt_price(sl_exec)} — algoId: {sl_id}")
+
+        push_log("INFO",    "─" * 44)
+        push_log("SUCCESS", "🏁 ALL ORDERS COMPLETE")
+        push_log("SUCCESS", f"   Entry : #{entry_id}  |  TP algo: #{tp_id}  |  SL algo: #{sl_id}")
+        push_log("INFO",    "─" * 44)
+
+    except ClientError as e:
+        push_log("ERROR", f"✗  Binance error: {e.error_code} — {e.error_message}")
+        push_log("ERROR", "─" * 44)
+    except Exception as e:
+        push_log("ERROR", f"✗  Unexpected error: {str(e)}")
+        push_log("ERROR", "─" * 44)
 
 
 # ── Routes ─────────────────────────────────────────────────────
+@app.on_event("startup")
+async def startup():
+    global _event_loop
+    _event_loop = asyncio.get_event_loop()
+
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     push_log("INFO", "Dashboard loaded")
     return templates.TemplateResponse("index.html", tpl_ctx(request))
 
-@app.post("/buy", response_class=HTMLResponse)
-async def buy(
-    request: Request,
+@app.post("/place-order")
+async def place_order(
+    request:     Request,
+    side:        str   = Form(...),
     limit_price: float = Form(...),
     margin:      float = Form(default=0),
     tp_offset:   float = Form(default=0),
@@ -164,46 +203,20 @@ async def buy(
     amount = margin    if margin    > 0 else AMOUNT
     tp     = tp_offset if tp_offset > 0 else TP_OFFSET
     sl     = sl_offset if sl_offset > 0 else SL_OFFSET
-    try:
-        result = run_order("BUY", limit_price, amount, tp, sl)
-        return templates.TemplateResponse("index.html", tpl_ctx(request, {
-            "result": result, "action": "BUY", "limit_price": limit_price,
-            "cfg_amount": amount, "cfg_tp": tp, "cfg_sl": sl,
-        }))
-    except (ClientError, RuntimeError, Exception) as e:
-        push_log("ERROR", f"BUY order failed: {e}")
-        return templates.TemplateResponse("index.html", tpl_ctx(request, {
-            "error": str(e), "action": "BUY", "limit_price": limit_price,
-            "cfg_amount": amount, "cfg_tp": tp, "cfg_sl": sl,
-        }))
 
-@app.post("/sell", response_class=HTMLResponse)
-async def sell(
-    request: Request,
-    limit_price: float = Form(...),
-    margin:      float = Form(default=0),
-    tp_offset:   float = Form(default=0),
-    sl_offset:   float = Form(default=0),
-):
-    amount = margin    if margin    > 0 else AMOUNT
-    tp     = tp_offset if tp_offset > 0 else TP_OFFSET
-    sl     = sl_offset if sl_offset > 0 else SL_OFFSET
-    try:
-        result = run_order("SELL", limit_price, amount, tp, sl)
-        return templates.TemplateResponse("index.html", tpl_ctx(request, {
-            "result": result, "action": "SELL", "limit_price": limit_price,
-            "cfg_amount": amount, "cfg_tp": tp, "cfg_sl": sl,
-        }))
-    except (ClientError, RuntimeError, Exception) as e:
-        push_log("ERROR", f"SELL order failed: {e}")
-        return templates.TemplateResponse("index.html", tpl_ctx(request, {
-            "error": str(e), "action": "SELL", "limit_price": limit_price,
-            "cfg_amount": amount, "cfg_tp": tp, "cfg_sl": sl,
-        }))
+    # Fire order in background thread — returns immediately (no page reload)
+    thread = threading.Thread(
+        target=run_order,
+        args=(side, limit_price, amount, tp, sl),
+        daemon=True,
+    )
+    thread.start()
+
+    return JSONResponse({"status": "started", "side": side, "price": limit_price})
 
 @app.get("/logs/stream")
 async def log_stream(request: Request):
-    queue: asyncio.Queue = asyncio.Queue(maxsize=100)
+    queue: asyncio.Queue = asyncio.Queue(maxsize=200)
     _log_subscribers.append(queue)
 
     async def event_generator():
