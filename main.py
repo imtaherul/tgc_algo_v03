@@ -31,13 +31,13 @@ def push_log(level: str, msg: str):
     _terminal_logs.append(entry)
     if len(_terminal_logs) > 200:
         _terminal_logs.pop(0)
-    # Thread-safe broadcast to SSE subscribers
+    # Thread-safe broadcast — works whether called from main thread or background thread
     if _event_loop and not _event_loop.is_closed():
         for q in list(_log_subscribers):
             try:
                 _event_loop.call_soon_threadsafe(q.put_nowait, entry)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"push_log broadcast failed: {e}")
 
 # ── Shared config ──────────────────────────────────────────────
 USE_TESTNET   = False
@@ -184,7 +184,7 @@ def run_order(side: str, limit_price: float, amount: float,
 @app.on_event("startup")
 async def startup():
     global _event_loop
-    _event_loop = asyncio.get_event_loop()
+    _event_loop = asyncio.get_running_loop()
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
@@ -213,6 +213,54 @@ async def place_order(
     thread.start()
 
     return JSONResponse({"status": "started", "side": side, "price": limit_price})
+
+@app.get("/open-orders")
+async def open_orders():
+    """Return all open regular + algo orders for SYMBOL."""
+    client = get_client()
+    try:
+        # /fapi/v1/openOrders returns only NEW + PARTIALLY_FILLED orders
+        regular = client.sign_request("GET", "/fapi/v1/openOrders", {"symbol": SYMBOL}) or []
+        if not isinstance(regular, list):
+            regular = []
+    except Exception as e:
+        push_log("ERROR", f"Failed to fetch regular orders: {e}")
+        regular = []
+    try:
+        # /fapi/v1/openAlgoOrders returns open conditional algo orders
+        algo_resp = client.sign_request("GET", "/fapi/v1/openAlgoOrders", {"symbol": SYMBOL})
+        # push_log("INFO", f"openAlgoOrders raw: {algo_resp}")
+        if isinstance(algo_resp, dict):
+            # response may use "orders", "algoOrders", or be a list directly
+            algo = (algo_resp.get("orders")
+                    or algo_resp.get("algoOrders")
+                    or algo_resp.get("data")
+                    or [])
+        elif isinstance(algo_resp, list):
+            algo = algo_resp
+        else:
+            algo = []
+    except Exception as e:
+        push_log("ERROR", f"Failed to fetch algo orders: {e}")
+        algo = []
+    return JSONResponse({"regular": regular, "algo": algo, "_algo_raw": str(algo_resp) if "algo_resp" in dir() else "error"})
+
+@app.post("/cancel-order")
+async def cancel_order(order_id: str = Form(...), order_type: str = Form(default="regular")):
+    """Cancel a regular or algo order."""
+    client = get_client()
+    try:
+        if order_type == "algo":
+            result = client.sign_request("DELETE", "/fapi/v1/algoOrder", {"algoId": int(order_id)})
+            push_log("WARN", f"🗑  Algo order #{order_id} cancelled")
+        else:
+            result = client.cancel_order(symbol=SYMBOL, orderId=int(order_id))
+            push_log("WARN", f"🗑  Order #{order_id} cancelled")
+        return JSONResponse({"status": "cancelled", "orderId": order_id})
+    except Exception as e:
+        push_log("ERROR", f"✗  Cancel failed for #{order_id}: {e}")
+        return JSONResponse({"status": "error", "msg": str(e)}, status_code=400)
+
 
 @app.get("/logs/stream")
 async def log_stream(request: Request):

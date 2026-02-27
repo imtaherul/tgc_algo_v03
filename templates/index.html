@@ -244,6 +244,66 @@
       text-align: center; border-top: 1px solid var(--border); padding-top: 20px;
       width: 100%; max-width: 880px;
     }
+
+    /* ══ OPEN ORDERS ══ */
+    .orders-wrap { margin-bottom: 40px; }
+    .orders-header {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 14px;
+    }
+    .orders-title {
+      font-family: var(--mono); font-size: 12px; color: var(--muted);
+      letter-spacing: 0.1em; text-transform: uppercase;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .orders-count {
+      background: var(--buy-dim); color: var(--buy); border: 1px solid var(--buy);
+      font-family: var(--mono); font-size: 10px; padding: 2px 7px; border-radius: 10px;
+    }
+    .btn-refresh {
+      width: auto; padding: 4px 12px; background: transparent;
+      border: 1px solid var(--border); border-radius: 4px; color: var(--muted);
+      font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em;
+      cursor: pointer; transition: color 0.15s, border-color 0.15s, transform 0.3s;
+    }
+    .btn-refresh:hover { color: var(--buy); border-color: var(--buy); opacity: 1; }
+    .btn-refresh.spinning { transform: rotate(180deg); }
+    .orders-empty {
+      font-family: var(--mono); font-size: 12px; color: var(--muted);
+      text-align: center; padding: 28px;
+      border: 1px dashed var(--border); border-radius: 10px;
+    }
+    .orders-table-wrap {
+      border: 1px solid var(--border); border-radius: 10px; overflow: hidden;
+    }
+    .orders-table { width: 100%; border-collapse: collapse; }
+    .orders-table th {
+      font-family: var(--mono); font-size: 10px; color: var(--muted);
+      text-align: left; letter-spacing: 0.1em; text-transform: uppercase;
+      padding: 9px 14px; background: #0a0f14; border-bottom: 1px solid var(--border);
+    }
+    .orders-table td {
+      font-family: var(--mono); font-size: 12px; color: var(--text);
+      padding: 10px 14px; border-bottom: 1px solid #0f1923; vertical-align: middle;
+    }
+    .orders-table tr:last-child td { border-bottom: none; }
+    .orders-table tbody tr:hover td { background: #0d1520; }
+    .side-buy  { color: var(--buy);  font-weight: 700; }
+    .side-sell { color: var(--sell); font-weight: 700; }
+    .type-badge {
+      font-size: 9px; padding: 2px 6px; border-radius: 3px;
+      background: var(--border); color: var(--muted); letter-spacing: 0.08em;
+    }
+    .type-badge.algo { background: #1a2535; color: var(--warn); border: 1px solid #2a3a4a; }
+    .btn-cancel {
+      width: auto; padding: 4px 10px;
+      background: transparent; border: 1px solid var(--sell);
+      border-radius: 4px; color: var(--sell);
+      font-family: var(--mono); font-size: 10px; letter-spacing: 0.06em;
+      cursor: pointer; transition: background 0.15s;
+    }
+    .btn-cancel:hover { background: var(--sell-dim); opacity: 1; }
+    .btn-cancel:disabled { opacity: 0.3; cursor: not-allowed; }
   </style>
 </head>
 <body>
@@ -368,6 +428,21 @@
       {% else %}
         <div class="terminal-empty" id="empty-msg">Waiting for activity...<span class="terminal-caret"></span></div>
       {% endif %}
+    </div>
+  </div>
+
+
+  <!-- ══════════ OPEN ORDERS ══════════ -->
+  <div class="orders-wrap">
+    <div class="orders-header">
+      <div class="orders-title">
+        OPEN ORDERS
+        <span class="orders-count" id="orders-count">0</span>
+      </div>
+      <button class="btn-refresh" id="btn-refresh" onclick="loadOrders()">↻ REFRESH</button>
+    </div>
+    <div id="orders-body">
+      <div class="orders-empty">Loading orders...</div>
     </div>
   </div>
 
@@ -522,6 +597,116 @@
 
   connectSSE();
   terminal.scrollTop = terminal.scrollHeight;
+
+  /* ── Open Orders ── */
+  async function loadOrders() {
+    const btn = document.getElementById('btn-refresh');
+    btn.classList.add('spinning');
+    btn.disabled = true;
+    try {
+      const res  = await fetch('/open-orders');
+      const data = await res.json();
+      renderOrders(data.regular || [], data.algo || []);
+    } catch(e) {
+      document.getElementById('orders-body').innerHTML =
+        '<div class="orders-empty">Failed to load orders.</div>';
+    } finally {
+      btn.classList.remove('spinning');
+      btn.disabled = false;
+    }
+  }
+
+  function renderOrders(regular, algo) {
+    const total = regular.length + algo.length;
+    document.getElementById('orders-count').textContent = total;
+
+    if (total === 0) {
+      document.getElementById('orders-body').innerHTML =
+        '<div class="orders-empty">No open orders for ' + '{{ cfg_symbol }}' + '</div>';
+      return;
+    }
+
+    let rows = '';
+
+    regular.forEach(o => {
+      const side    = o.side || '—';
+      const sideClass = side === 'BUY' ? 'side-buy' : 'side-sell';
+      const status  = o.status || '—';
+      const price   = parseFloat(o.price || 0).toFixed(2);
+      const qty     = parseFloat(o.origQty || 0).toFixed(4);
+      const filled  = parseFloat(o.executedQty || 0).toFixed(4);
+      const type    = o.type || '—';
+      rows += `<tr>
+        <td><span class="${sideClass}">${side}</span></td>
+        <td><span class="type-badge">${type}</span></td>
+        <td>$${price}</td>
+        <td>${qty}</td>
+        <td>${filled}</td>
+        <td>${status}</td>
+        <td>#${o.orderId}</td>
+        <td><button class="btn-cancel" onclick="cancelOrder('${o.orderId}','regular',this)">✕ CANCEL</button></td>
+      </tr>`;
+    });
+
+    algo.forEach(o => {
+      const side      = o.side || '—';
+      const sideClass = side === 'BUY' ? 'side-buy' : 'side-sell';
+      const price     = parseFloat(o.price || 0).toFixed(2);
+      const trigger   = parseFloat(o.triggerPrice || 0).toFixed(2);
+      const qty       = parseFloat(o.quantity || 0).toFixed(4);
+      const type      = o.orderType || o.type || '—';
+      const status    = o.algoStatus || '—';
+      rows += `<tr>
+        <td><span class="${sideClass}">${side}</span></td>
+        <td><span class="type-badge algo">${type}</span></td>
+        <td>$${price} <span style="color:var(--muted);font-size:10px">trig:$${trigger}</span></td>
+        <td>${qty}</td>
+        <td>—</td>
+        <td>${status}</td>
+        <td>algo#${o.algoId}</td>
+        <td><button class="btn-cancel" onclick="cancelOrder('${o.algoId}','algo',this)">✕ CANCEL</button></td>
+      </tr>`;
+    });
+
+    document.getElementById('orders-body').innerHTML = `
+      <div class="orders-table-wrap">
+        <table class="orders-table">
+          <thead><tr>
+            <th>SIDE</th><th>TYPE</th><th>PRICE</th>
+            <th>QTY</th><th>FILLED</th><th>STATUS</th><th>ID</th><th></th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+  }
+
+  async function cancelOrder(orderId, type, btn) {
+    if (!confirm('Cancel order #' + orderId + '?')) return;
+    btn.disabled = true;
+    btn.textContent = '...';
+    const body = new URLSearchParams({ order_id: orderId, order_type: type });
+    try {
+      const res  = await fetch('/cancel-order', { method: 'POST', body });
+      const data = await res.json();
+      if (data.status === 'cancelled') {
+        btn.closest('tr').style.opacity = '0.3';
+        btn.textContent = '✓';
+        setTimeout(loadOrders, 800);
+      } else {
+        btn.disabled = false;
+        btn.textContent = '✕ CANCEL';
+        alert('Cancel failed: ' + (data.msg || 'unknown error'));
+      }
+    } catch(e) {
+      btn.disabled = false;
+      btn.textContent = '✕ CANCEL';
+    }
+  }
+
+  // Load orders on page load and after placing an order
+  loadOrders();
+  setInterval(loadOrders, 10000); // auto-refresh every 10s
+
 </script>
 </body>
 </html>
