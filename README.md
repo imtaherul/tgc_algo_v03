@@ -126,6 +126,9 @@ __pycache__/
 
 ```bash
 Invoke-RestMethod -Uri https://api.ipify.org
+
+cd C:\Users
+python -m uvicorn main:app --reload
 ```
 
 ---
