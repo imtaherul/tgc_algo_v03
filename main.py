@@ -31,7 +31,6 @@ def push_log(level: str, msg: str):
     _terminal_logs.append(entry)
     if len(_terminal_logs) > 200:
         _terminal_logs.pop(0)
-    # Thread-safe broadcast — works whether called from main thread or background thread
     if _event_loop and not _event_loop.is_closed():
         for q in list(_log_subscribers):
             try:
@@ -43,11 +42,12 @@ def push_log(level: str, msg: str):
 USE_TESTNET   = False
 SYMBOL        = "BTCUSDT"
 LEVERAGE      = 10
-AMOUNT        = 2000.0
+AMOUNT        = 1650.0
 TP_OFFSET     = 1000.0
-SL_OFFSET     = 400.0
+SL_OFFSET     = 300.0
 WORKING_TYPE  = "MARK_PRICE"
 POLL_INTERVAL = 5
+MONITOR_INTERVAL = 10   # seconds between position checks
 
 def get_client() -> UMFutures:
     if USE_TESTNET:
@@ -71,6 +71,76 @@ def tpl_ctx(request: Request, extra: dict = {}) -> dict:
         **extra,
     }
 
+# ── Position monitor — auto-cancels orphan algo orders ─────────
+def _cancel_algo(client: UMFutures, algo_id: int, reason: str):
+    try:
+        client.sign_request("DELETE", "/fapi/v1/algoOrder", {"algoId": algo_id})
+        push_log("WARN", f"🗑  Auto-cancelled algo #{algo_id}  ({reason})")
+    except Exception as e:
+        push_log("ERROR", f"✗  Failed to auto-cancel algo #{algo_id}: {e}")
+
+def position_monitor():
+    """
+    Background thread: every MONITOR_INTERVAL seconds —
+      1. Fetch open positions for SYMBOL
+      2. Fetch open algo orders for SYMBOL
+      3. If position size == 0 but algo orders exist → cancel all of them
+         (position was closed by TP, SL, or manual — orphan algo orders remain)
+    """
+    push_log("INFO", f"🔍 Position monitor started (every {MONITOR_INTERVAL}s)")
+    client = get_client()
+
+    # Track previous position size to detect transitions
+    prev_pos_size: float = None
+
+    while True:
+        try:
+            time.sleep(MONITOR_INTERVAL)
+
+            # ── Get position ─────────────────────────────────────
+            positions = client.sign_request("GET", "/fapi/v2/positionRisk", {"symbol": SYMBOL})
+            pos_size = 0.0
+            for p in (positions if isinstance(positions, list) else []):
+                if p.get("symbol") == SYMBOL:
+                    pos_size = abs(float(p.get("positionAmt", 0)))
+                    break
+
+            # ── Get open algo orders ──────────────────────────────
+            algo_resp = client.sign_request("GET", "/fapi/v1/openAlgoOrders", {"symbol": SYMBOL})
+            if isinstance(algo_resp, dict):
+                algo_orders = (algo_resp.get("orders")
+                               or algo_resp.get("algoOrders")
+                               or algo_resp.get("data")
+                               or [])
+            elif isinstance(algo_resp, list):
+                algo_orders = algo_resp
+            else:
+                algo_orders = []
+
+            # ── Detect position closed with orphan algo orders ────
+            if pos_size == 0.0 and algo_orders:
+                push_log("WARN",  "⚠  Position is CLOSED but algo orders still open — cleaning up...")
+                for o in algo_orders:
+                    algo_id   = o.get("algoId")
+                    algo_type = o.get("orderType", o.get("type", "?"))
+                    trigger   = o.get("triggerPrice", "?")
+                    push_log("INFO", f"   Cancelling orphan {algo_type} algo #{algo_id}  trigger: ${trigger}")
+                    _cancel_algo(client, algo_id, "position closed")
+                push_log("SUCCESS", "✓  All orphan algo orders cancelled")
+
+            # ── Log transition: position opened or closed ─────────
+            if prev_pos_size is not None:
+                if prev_pos_size == 0.0 and pos_size > 0.0:
+                    push_log("INFO", f"📈 Position OPENED — size: {pos_size} BTC")
+                elif prev_pos_size > 0.0 and pos_size == 0.0:
+                    push_log("SUCCESS", f"✅ Position CLOSED — was {prev_pos_size} BTC")
+
+            prev_pos_size = pos_size
+
+        except Exception as e:
+            logger.warning(f"Position monitor error: {e}")
+
+
 # ── Order execution (runs in background thread) ────────────────
 def run_order(side: str, limit_price: float, amount: float,
               tp_offset: float, sl_offset: float):
@@ -90,12 +160,12 @@ def run_order(side: str, limit_price: float, amount: float,
     push_log("INFO",  "─" * 44)
 
     try:
-        # ── Step 1: Set leverage ───────────────────────────────
+        # Step 1: Set leverage
         push_log("INFO", "⚙  [1/4] Setting leverage...")
         resp = client.change_leverage(symbol=SYMBOL, leverage=LEVERAGE)
         push_log("SUCCESS", f"✓  Leverage set to {resp['leverage']}x for {resp['symbol']}")
 
-        # ── Step 2: Place limit entry ──────────────────────────
+        # Step 2: Place limit entry
         push_log("INFO", f"📤 [2/4] Placing LIMIT {side} @ ${fmt_price(limit_price)} | qty: {fmt_qty(quantity)}")
         entry = client.new_order(
             symbol=SYMBOL, side=side, type="LIMIT",
@@ -106,7 +176,7 @@ def run_order(side: str, limit_price: float, amount: float,
         entry_id = entry["orderId"]
         push_log("SUCCESS", f"✓  Entry order placed — orderId: {entry_id}")
 
-        # ── Step 3: Wait for fill ──────────────────────────────
+        # Step 3: Wait for fill
         push_log("INFO", f"⏳ [3/4] Waiting for order {entry_id} to fill...")
         attempt = 0
         while True:
@@ -115,7 +185,6 @@ def run_order(side: str, limit_price: float, amount: float,
             status = order["status"]
             filled = float(order.get("executedQty", 0))
             push_log("INFO", f"   Poll #{attempt} → status: {status}  filled: {filled}/{fmt_qty(quantity)} BTC")
-
             if status == "FILLED":
                 push_log("SUCCESS", f"✓  Order FILLED! avg price: ${order.get('avgPrice','?')}")
                 break
@@ -124,18 +193,15 @@ def run_order(side: str, limit_price: float, amount: float,
                 return
             if status == "PARTIALLY_FILLED":
                 push_log("WARN", f"   Partially filled ({filled} BTC) — still waiting...")
-
             push_log("INFO", f"   Next poll in {POLL_INTERVAL}s...")
             time.sleep(POLL_INTERVAL)
 
-        # ── Step 4: Place TP + SL via /fapi/v1/algoOrder (CONDITIONAL) ──
-        # UMFutures has no wrapper for this endpoint — call it directly via sign_request
+        # Step 4: Place TP + SL via Algo Order API
         push_log("INFO", "📤 [4/4] Placing Take Profit & Stop Loss via Algo Order API...")
-
         tp_exec = take_profit - 5  if side == "BUY" else take_profit + 5
         sl_exec = stop_loss  - 10  if side == "BUY" else stop_loss  + 10
 
-        push_log("INFO", f"   → TP: CONDITIONAL/TAKE_PROFIT {exit_side(side)} | trigger: ${fmt_price(take_profit)} | exec: ${fmt_price(tp_exec)}")
+        push_log("INFO", f"   → TP: TAKE_PROFIT {exit_side(side)} | trigger: ${fmt_price(take_profit)} | exec: ${fmt_price(tp_exec)}")
         tp = client.sign_request("POST", "/fapi/v1/algoOrder", {
             "symbol":       SYMBOL,
             "side":         exit_side(side),
@@ -149,9 +215,9 @@ def run_order(side: str, limit_price: float, amount: float,
             "reduceOnly":   "true",
         })
         tp_id = tp.get("algoId", "?")
-        push_log("SUCCESS", f"✓  Take Profit placed | trigger: ${fmt_price(take_profit)} exec: ${fmt_price(tp_exec)} — algoId: {tp_id}")
+        push_log("SUCCESS", f"✓  Take Profit placed | trigger: ${fmt_price(take_profit)} — algoId: {tp_id}")
 
-        push_log("INFO", f"   → SL: CONDITIONAL/STOP {exit_side(side)} | trigger: ${fmt_price(stop_loss)} | exec: ${fmt_price(sl_exec)}")
+        push_log("INFO", f"   → SL: STOP {exit_side(side)} | trigger: ${fmt_price(stop_loss)} | exec: ${fmt_price(sl_exec)}")
         sl = client.sign_request("POST", "/fapi/v1/algoOrder", {
             "symbol":       SYMBOL,
             "side":         exit_side(side),
@@ -165,11 +231,11 @@ def run_order(side: str, limit_price: float, amount: float,
             "reduceOnly":   "true",
         })
         sl_id = sl.get("algoId", "?")
-        push_log("SUCCESS", f"✓  Stop Loss placed   | trigger: ${fmt_price(stop_loss)} exec: ${fmt_price(sl_exec)} — algoId: {sl_id}")
+        push_log("SUCCESS", f"✓  Stop Loss placed   | trigger: ${fmt_price(stop_loss)} — algoId: {sl_id}")
 
         push_log("INFO",    "─" * 44)
         push_log("SUCCESS", "🏁 ALL ORDERS COMPLETE")
-        push_log("SUCCESS", f"   Entry : #{entry_id}  |  TP algo: #{tp_id}  |  SL algo: #{sl_id}")
+        push_log("SUCCESS", f"   Entry: #{entry_id}  TP algo: #{tp_id}  SL algo: #{sl_id}")
         push_log("INFO",    "─" * 44)
 
     except ClientError as e:
@@ -185,6 +251,9 @@ def run_order(side: str, limit_price: float, amount: float,
 async def startup():
     global _event_loop
     _event_loop = asyncio.get_running_loop()
+    # Start position monitor in background daemon thread
+    t = threading.Thread(target=position_monitor, daemon=True)
+    t.start()
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
@@ -203,64 +272,52 @@ async def place_order(
     amount = margin    if margin    > 0 else AMOUNT
     tp     = tp_offset if tp_offset > 0 else TP_OFFSET
     sl     = sl_offset if sl_offset > 0 else SL_OFFSET
-
-    # Fire order in background thread — returns immediately (no page reload)
     thread = threading.Thread(
         target=run_order,
         args=(side, limit_price, amount, tp, sl),
         daemon=True,
     )
     thread.start()
-
     return JSONResponse({"status": "started", "side": side, "price": limit_price})
 
 @app.get("/open-orders")
 async def open_orders():
-    """Return all open regular + algo orders for SYMBOL."""
     client = get_client()
     try:
-        # /fapi/v1/openOrders returns only NEW + PARTIALLY_FILLED orders
         regular = client.sign_request("GET", "/fapi/v1/openOrders", {"symbol": SYMBOL}) or []
         if not isinstance(regular, list):
             regular = []
     except Exception as e:
         push_log("ERROR", f"Failed to fetch regular orders: {e}")
         regular = []
+    algo = []
     try:
-        # /fapi/v1/openAlgoOrders returns open conditional algo orders
         algo_resp = client.sign_request("GET", "/fapi/v1/openAlgoOrders", {"symbol": SYMBOL})
-        # push_log("INFO", f"openAlgoOrders raw: {algo_resp}")
         if isinstance(algo_resp, dict):
-            # response may use "orders", "algoOrders", or be a list directly
             algo = (algo_resp.get("orders")
                     or algo_resp.get("algoOrders")
                     or algo_resp.get("data")
                     or [])
         elif isinstance(algo_resp, list):
             algo = algo_resp
-        else:
-            algo = []
     except Exception as e:
         push_log("ERROR", f"Failed to fetch algo orders: {e}")
-        algo = []
-    return JSONResponse({"regular": regular, "algo": algo, "_algo_raw": str(algo_resp) if "algo_resp" in dir() else "error"})
+    return JSONResponse({"regular": regular, "algo": algo})
 
 @app.post("/cancel-order")
 async def cancel_order(order_id: str = Form(...), order_type: str = Form(default="regular")):
-    """Cancel a regular or algo order."""
     client = get_client()
     try:
         if order_type == "algo":
-            result = client.sign_request("DELETE", "/fapi/v1/algoOrder", {"algoId": int(order_id)})
+            client.sign_request("DELETE", "/fapi/v1/algoOrder", {"algoId": int(order_id)})
             push_log("WARN", f"🗑  Algo order #{order_id} cancelled")
         else:
-            result = client.cancel_order(symbol=SYMBOL, orderId=int(order_id))
+            client.cancel_order(symbol=SYMBOL, orderId=int(order_id))
             push_log("WARN", f"🗑  Order #{order_id} cancelled")
         return JSONResponse({"status": "cancelled", "orderId": order_id})
     except Exception as e:
         push_log("ERROR", f"✗  Cancel failed for #{order_id}: {e}")
         return JSONResponse({"status": "error", "msg": str(e)}, status_code=400)
-
 
 @app.get("/logs/stream")
 async def log_stream(request: Request):
