@@ -42,9 +42,9 @@ def push_log(level: str, msg: str):
 USE_TESTNET   = False
 SYMBOL        = "BTCUSDT"
 LEVERAGE      = 10
-AMOUNT        = 1650.0
+AMOUNT        = 5000.0
 TP_OFFSET     = 1000.0
-SL_OFFSET     = 300.0
+SL_OFFSET     = 400.0
 WORKING_TYPE  = "MARK_PRICE"
 POLL_INTERVAL = 5
 MONITOR_INTERVAL = 10   # seconds between position checks
@@ -254,6 +254,12 @@ async def startup():
     # Start position monitor in background daemon thread
     t = threading.Thread(target=position_monitor, daemon=True)
     t.start()
+    # Auto-open browser after server is ready
+    def _open_browser():
+        import webbrowser
+        time.sleep(1.5)
+        webbrowser.open("http://127.0.0.1:8000")
+    threading.Thread(target=_open_browser, daemon=True).start()
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
@@ -317,6 +323,41 @@ async def cancel_order(order_id: str = Form(...), order_type: str = Form(default
         return JSONResponse({"status": "cancelled", "orderId": order_id})
     except Exception as e:
         push_log("ERROR", f"✗  Cancel failed for #{order_id}: {e}")
+        return JSONResponse({"status": "error", "msg": str(e)}, status_code=400)
+
+
+@app.get("/open-positions")
+async def open_positions():
+    """Return open positions for SYMBOL."""
+    client = get_client()
+    try:
+        positions = client.sign_request("GET", "/fapi/v2/positionRisk", {"symbol": SYMBOL})
+        open_pos = [p for p in (positions if isinstance(positions, list) else [])
+                    if abs(float(p.get("positionAmt", 0))) > 0]
+        return JSONResponse({"positions": open_pos})
+    except Exception as e:
+        push_log("ERROR", f"Failed to fetch positions: {e}")
+        return JSONResponse({"positions": [], "error": str(e)})
+
+@app.post("/close-position")
+async def close_position(symbol: str = Form(...), side: str = Form(...), quantity: str = Form(...)):
+    """Market-close a position immediately."""
+    client = get_client()
+    # To close: if position is LONG (BUY), send SELL market; if SHORT (SELL), send BUY market
+    close_side = "SELL" if side == "BUY" else "BUY"
+    try:
+        result = client.new_order(
+            symbol=symbol,
+            side=close_side,
+            type="MARKET",
+            quantity=quantity,
+            reduceOnly="true",
+        )
+        push_log("WARN",    f"⚡ Position MARKET CLOSED — {side} {quantity} {symbol}")
+        push_log("SUCCESS", f"✓  Close order filled — orderId: {result.get('orderId','?')}")
+        return JSONResponse({"status": "closed", "orderId": result.get("orderId")})
+    except Exception as e:
+        push_log("ERROR", f"✗  Close position failed: {e}")
         return JSONResponse({"status": "error", "msg": str(e)}, status_code=400)
 
 @app.get("/logs/stream")

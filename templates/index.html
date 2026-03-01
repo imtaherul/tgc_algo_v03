@@ -646,6 +646,73 @@
         max-width: 880px;
       }
 
+      /* ══ OPEN POSITIONS ══ */
+      .positions-wrap {
+        margin-bottom: 32px;
+      }
+      .pos-table-wrap {
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        overflow: hidden;
+      }
+      .pos-table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      .pos-table th {
+        font-family: var(--mono);
+        font-size: 10px;
+        color: var(--muted);
+        text-align: left;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        padding: 9px 14px;
+        background: #0a0f14;
+        border-bottom: 1px solid var(--border);
+      }
+      .pos-table td {
+        font-family: var(--mono);
+        font-size: 12px;
+        color: var(--text);
+        padding: 10px 14px;
+        border-bottom: 1px solid #0f1923;
+        vertical-align: middle;
+      }
+      .pos-table tr:last-child td {
+        border-bottom: none;
+      }
+      .pos-table tbody tr:hover td {
+        background: #0d1520;
+      }
+      .pnl-pos {
+        color: var(--buy);
+      }
+      .pnl-neg {
+        color: var(--sell);
+      }
+      .btn-close-pos {
+        width: auto;
+        padding: 5px 14px;
+        background: var(--sell-dim);
+        border: 1px solid var(--sell);
+        border-radius: 4px;
+        color: var(--sell);
+        font-family: var(--mono);
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        cursor: pointer;
+        transition: background 0.15s;
+      }
+      .btn-close-pos:hover {
+        background: #ff406030;
+        opacity: 1;
+      }
+      .btn-close-pos:disabled {
+        opacity: 0.3;
+        cursor: not-allowed;
+      }
+
       /* ══ OPEN ORDERS ══ */
       .orders-wrap {
         margin-bottom: 40px;
@@ -971,6 +1038,26 @@
         </div>
       </div>
 
+      <!-- ══════════ OPEN POSITIONS ══════════ -->
+      <div class="positions-wrap">
+        <div class="orders-header">
+          <div class="orders-title">
+            OPEN POSITIONS
+            <span class="orders-count" id="positions-count">0</span>
+          </div>
+          <button
+            class="btn-refresh"
+            id="btn-refresh-pos"
+            onclick="loadPositions()"
+          >
+            ↻ REFRESH
+          </button>
+        </div>
+        <div id="positions-body">
+          <div class="orders-empty">Loading positions...</div>
+        </div>
+      </div>
+
       <!-- ══════════ OPEN ORDERS ══════════ -->
       <div class="orders-wrap">
         <div class="orders-header">
@@ -1117,8 +1204,8 @@
           `<span class="log-msg">${escHtml(entry.msg)}</span>`;
         terminal.appendChild(line);
         while (terminal.children.length > 200) terminal.removeChild(terminal.firstChild);
-        const nearBottom = terminal.scrollHeight - terminal.scrollTop - terminal.clientHeight < 60;
-        if (nearBottom) terminal.scrollTop = terminal.scrollHeight;
+        // Always scroll to bottom instantly when new log arrives
+        terminal.scrollTop = terminal.scrollHeight;
       }
 
       function escHtml(str) {
@@ -1249,6 +1336,106 @@
           btn.textContent = '✕ CANCEL';
         }
       }
+
+
+      /* ── Open Positions ── */
+      async function loadPositions() {
+        const btn = document.getElementById('btn-refresh-pos');
+        btn.classList.add('spinning');
+        btn.disabled = true;
+        try {
+          const res  = await fetch('/open-positions');
+          const data = await res.json();
+          renderPositions(data.positions || []);
+        } catch(e) {
+          document.getElementById('positions-body').innerHTML =
+            '<div class="orders-empty">Failed to load positions.</div>';
+        } finally {
+          btn.classList.remove('spinning');
+          btn.disabled = false;
+        }
+      }
+
+      function renderPositions(positions) {
+        document.getElementById('positions-count').textContent = positions.length;
+
+        if (positions.length === 0) {
+          document.getElementById('positions-body').innerHTML =
+            '<div class="orders-empty">No open positions for {{ cfg_symbol }}</div>';
+          return;
+        }
+
+        let rows = '';
+        positions.forEach(p => {
+          const amt       = parseFloat(p.positionAmt || 0);
+          const side      = amt > 0 ? 'BUY' : 'SELL';
+          const sideClass = amt > 0 ? 'side-buy' : 'side-sell';
+          const sideLabel = amt > 0 ? 'LONG' : 'SHORT';
+          const absAmt    = Math.abs(amt).toFixed(4);
+          const entry     = parseFloat(p.entryPrice || 0).toFixed(2);
+          const mark      = parseFloat(p.markPrice  || 0).toFixed(2);
+          const liq       = parseFloat(p.liquidationPrice || 0).toFixed(2);
+          const pnl       = parseFloat(p.unRealizedProfit || 0);
+          const pnlClass  = pnl >= 0 ? 'pnl-pos' : 'pnl-neg';
+          const pnlSign   = pnl >= 0 ? '+' : '';
+          const leverage  = p.leverage || '—';
+          const symbol    = p.symbol   || '{{ cfg_symbol }}';
+
+          rows += `<tr>
+            <td><span class="${sideClass}">${sideLabel}</span></td>
+            <td>${symbol}</td>
+            <td>${leverage}×</td>
+            <td>${absAmt} BTC</td>
+            <td>$${entry}</td>
+            <td>$${mark}</td>
+            <td>$${liq}</td>
+            <td class="${pnlClass}">${pnlSign}$${pnl.toFixed(2)}</td>
+            <td>
+              <button class="btn-close-pos"
+                onclick="closePosition('${symbol}','${side}','${absAmt}',this)">
+                ⚡ CLOSE
+              </button>
+            </td>
+          </tr>`;
+        });
+
+        document.getElementById('positions-body').innerHTML = `
+          <div class="pos-table-wrap">
+            <table class="pos-table">
+              <thead><tr>
+                <th>SIDE</th><th>SYMBOL</th><th>LEV</th><th>SIZE</th>
+                <th>ENTRY</th><th>MARK</th><th>LIQ</th><th>UNREAL PNL</th><th></th>
+              </tr></thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>`;
+      }
+
+      async function closePosition(symbol, side, quantity, btn) {
+        if (!confirm(`MARKET CLOSE ${side} ${quantity} ${symbol}?\n\nThis will close the position immediately at market price.`)) return;
+        btn.disabled = true;
+        btn.textContent = 'CLOSING...';
+        const body = new URLSearchParams({ symbol, side, quantity });
+        try {
+          const res  = await fetch('/close-position', { method: 'POST', body });
+          const data = await res.json();
+          if (data.status === 'closed') {
+            btn.closest('tr').style.opacity = '0.3';
+            btn.textContent = '✓ CLOSED';
+            setTimeout(() => { loadPositions(); loadOrders(); }, 1000);
+          } else {
+            btn.disabled = false;
+            btn.textContent = '⚡ CLOSE';
+            alert('Close failed: ' + (data.msg || 'unknown error'));
+          }
+        } catch(e) {
+          btn.disabled = false;
+          btn.textContent = '⚡ CLOSE';
+        }
+      }
+
+      loadPositions();
+      setInterval(loadPositions, 10000);
 
       // Load orders on page load and after placing an order
       loadOrders();
