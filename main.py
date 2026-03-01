@@ -44,10 +44,10 @@ SYMBOL        = "BTCUSDT"
 LEVERAGE      = 10
 AMOUNT        = 5000.0
 TP_OFFSET     = 1000.0
-SL_OFFSET     = 400.0
+SL_OFFSET     = 300.0
 WORKING_TYPE  = "MARK_PRICE"
 POLL_INTERVAL = 5
-MONITOR_INTERVAL = 10   # seconds between position checks
+MONITOR_INTERVAL = 5    # seconds between position checks
 
 def get_client() -> UMFutures:
     if USE_TESTNET:
@@ -359,6 +359,18 @@ async def close_position(symbol: str = Form(...), side: str = Form(...), quantit
     except Exception as e:
         push_log("ERROR", f"✗  Close position failed: {e}")
         return JSONResponse({"status": "error", "msg": str(e)}, status_code=400)
+
+
+@app.get("/ticker")
+async def ticker():
+    """Return current mark price for SYMBOL."""
+    client = get_client()
+    try:
+        data = client.mark_price(symbol=SYMBOL)
+        price = float(data.get("markPrice", 0))
+        return JSONResponse({"price": price, "symbol": SYMBOL})
+    except Exception as e:
+        return JSONResponse({"price": 0, "error": str(e)}, status_code=500)
 
 @app.get("/logs/stream")
 async def log_stream(request: Request):
