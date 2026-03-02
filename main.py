@@ -55,7 +55,10 @@ def get_client() -> UMFutures:
                          base_url="https://testnet.binancefuture.com")
     return UMFutures(key=api, secret=secret)
 
-def fmt_price(p: float) -> str: return f"{p:.2f}"
+def fmt_price(p: float) -> str:
+    # BTCUSDT tick size = 0.1 — round to 1 decimal place
+    rounded = round(round(p / 0.1) * 0.1, 1)
+    return f"{rounded:.1f}" 
 def fmt_qty(q: float)   -> str: return f"{q:.3f}"
 def exit_side(side: str) -> str: return "SELL" if side == "BUY" else "BUY"
 
