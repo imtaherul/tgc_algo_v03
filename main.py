@@ -49,11 +49,31 @@ WORKING_TYPE  = "MARK_PRICE"
 POLL_INTERVAL = 5
 MONITOR_INTERVAL = 5    # seconds between position checks
 
+# ── Server time sync ──────────────────────────────────────────
+_time_offset_ms: int = 0
+
+def sync_server_time():
+    """Measure clock skew vs Binance and store the offset."""
+    global _time_offset_ms
+    try:
+        tmp = UMFutures()
+        server_time    = tmp.time()["serverTime"]
+        local_time     = int(time.time() * 1000)
+        _time_offset_ms = server_time - local_time
+        logger.info(f"Time sync OK — offset: {_time_offset_ms:+d}ms")
+    except Exception as e:
+        logger.warning(f"Time sync failed: {e}")
+
 def get_client() -> UMFutures:
     if USE_TESTNET:
-        return UMFutures(key=api, secret=secret,
-                         base_url="https://testnet.binancefuture.com")
+        return UMFutures(key=api, secret=secret, base_url="https://testnet.binancefuture.com")
     return UMFutures(key=api, secret=secret)
+
+def signed_request(client: UMFutures, method: str, path: str, params: dict) -> dict:
+    """Inject corrected timestamp + recvWindow into every signed request."""
+    params["timestamp"]  = int(time.time() * 1000) + _time_offset_ms
+    params["recvWindow"] = 60000
+    return client.sign_request(method, path, params)
 
 def fmt_price(p: float) -> str:
     # BTCUSDT tick size = 0.1 — round to 1 decimal place
@@ -77,7 +97,7 @@ def tpl_ctx(request: Request, extra: dict = {}) -> dict:
 # ── Position monitor — auto-cancels orphan algo orders ─────────
 def _cancel_algo(client: UMFutures, algo_id: int, reason: str):
     try:
-        client.sign_request("DELETE", "/fapi/v1/algoOrder", {"algoId": algo_id})
+        signed_request(client, "DELETE", "/fapi/v1/algoOrder", {"algoId": algo_id})
         push_log("WARN", f"🗑  Auto-cancelled algo #{algo_id}  ({reason})")
     except Exception as e:
         push_log("ERROR", f"✗  Failed to auto-cancel algo #{algo_id}: {e}")
@@ -95,13 +115,19 @@ def position_monitor():
 
     # Track previous position size to detect transitions
     prev_pos_size: float = None
+    _sync_counter = 0
 
     while True:
         try:
             time.sleep(MONITOR_INTERVAL)
+            # Re-sync server time every 30 minutes (360 × 5s intervals)
+            _sync_counter += 1
+            if _sync_counter % 360 == 0:
+                sync_server_time()
+                client = get_client()  # rebuild with updated timestamp_offset
 
             # ── Get position ─────────────────────────────────────
-            positions = client.sign_request("GET", "/fapi/v2/positionRisk", {"symbol": SYMBOL})
+            positions = signed_request(client, "GET", "/fapi/v2/positionRisk", {"symbol": SYMBOL})
             pos_size = 0.0
             for p in (positions if isinstance(positions, list) else []):
                 if p.get("symbol") == SYMBOL:
@@ -109,7 +135,7 @@ def position_monitor():
                     break
 
             # ── Get open algo orders ──────────────────────────────
-            algo_resp = client.sign_request("GET", "/fapi/v1/openAlgoOrders", {"symbol": SYMBOL})
+            algo_resp = signed_request(client, "GET", "/fapi/v1/openAlgoOrders", {"symbol": SYMBOL})
             if isinstance(algo_resp, dict):
                 algo_orders = (algo_resp.get("orders")
                                or algo_resp.get("algoOrders")
@@ -205,7 +231,7 @@ def run_order(side: str, limit_price: float, amount: float,
         sl_exec = stop_loss  - 10  if side == "BUY" else stop_loss  + 10
 
         push_log("INFO", f"   → TP: TAKE_PROFIT {exit_side(side)} | trigger: ${fmt_price(take_profit)} | exec: ${fmt_price(tp_exec)}")
-        tp = client.sign_request("POST", "/fapi/v1/algoOrder", {
+        tp = signed_request(client, "POST", "/fapi/v1/algoOrder", {
             "symbol":       SYMBOL,
             "side":         exit_side(side),
             "algoType":     "CONDITIONAL",
@@ -221,7 +247,7 @@ def run_order(side: str, limit_price: float, amount: float,
         push_log("SUCCESS", f"✓  Take Profit placed | trigger: ${fmt_price(take_profit)} — algoId: {tp_id}")
 
         push_log("INFO", f"   → SL: STOP {exit_side(side)} | trigger: ${fmt_price(stop_loss)} | exec: ${fmt_price(sl_exec)}")
-        sl = client.sign_request("POST", "/fapi/v1/algoOrder", {
+        sl = signed_request(client, "POST", "/fapi/v1/algoOrder", {
             "symbol":       SYMBOL,
             "side":         exit_side(side),
             "algoType":     "CONDITIONAL",
@@ -254,6 +280,7 @@ def run_order(side: str, limit_price: float, amount: float,
 async def startup():
     global _event_loop
     _event_loop = asyncio.get_running_loop()
+    sync_server_time()   # sync clock before anything else
     # Start position monitor in background daemon thread
     t = threading.Thread(target=position_monitor, daemon=True)
     t.start()
@@ -293,7 +320,7 @@ async def place_order(
 async def open_orders():
     client = get_client()
     try:
-        regular = client.sign_request("GET", "/fapi/v1/openOrders", {"symbol": SYMBOL}) or []
+        regular = signed_request(client, "GET", "/fapi/v1/openOrders", {"symbol": SYMBOL}) or []
         if not isinstance(regular, list):
             regular = []
     except Exception as e:
@@ -301,7 +328,7 @@ async def open_orders():
         regular = []
     algo = []
     try:
-        algo_resp = client.sign_request("GET", "/fapi/v1/openAlgoOrders", {"symbol": SYMBOL})
+        algo_resp = signed_request(client, "GET", "/fapi/v1/openAlgoOrders", {"symbol": SYMBOL})
         if isinstance(algo_resp, dict):
             algo = (algo_resp.get("orders")
                     or algo_resp.get("algoOrders")
@@ -318,7 +345,7 @@ async def cancel_order(order_id: str = Form(...), order_type: str = Form(default
     client = get_client()
     try:
         if order_type == "algo":
-            client.sign_request("DELETE", "/fapi/v1/algoOrder", {"algoId": int(order_id)})
+            signed_request(client, "DELETE", "/fapi/v1/algoOrder", {"algoId": int(order_id)})
             push_log("WARN", f"🗑  Algo order #{order_id} cancelled")
         else:
             client.cancel_order(symbol=SYMBOL, orderId=int(order_id))
@@ -334,7 +361,7 @@ async def open_positions():
     """Return open positions for SYMBOL."""
     client = get_client()
     try:
-        positions = client.sign_request("GET", "/fapi/v2/positionRisk", {"symbol": SYMBOL})
+        positions = signed_request(client, "GET", "/fapi/v2/positionRisk", {"symbol": SYMBOL})
         open_pos = [p for p in (positions if isinstance(positions, list) else [])
                     if abs(float(p.get("positionAmt", 0))) > 0]
         return JSONResponse({"positions": open_pos})
