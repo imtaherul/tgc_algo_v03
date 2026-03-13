@@ -991,7 +991,6 @@
           onclick="toggleLivePrice()"
         >
           <div class="live-dot" id="live-dot"></div>
-          <span id="live-price-val" class="live-price-val">—</span>
           <input
             type="checkbox"
             id="chk-live"
@@ -1002,6 +1001,7 @@
             "
             title="Auto-update price inputs with live mark price"
           />
+          <span id="live-price-val" class="live-price-val">—</span>
           <!-- <span id="live-label">LIVE PRICE</span> -->
         </div>
       </div>
@@ -1212,9 +1212,11 @@
 
       /* ── AJAX order submission — no page reload ── */
       async function placeOrder(side) {
+        if (_orderInProgress) return;  // prevent double-click
+
         const priceEl = document.getElementById(side.toLowerCase() + '_price');
 
-        // ① Snapshot price BEFORE confirm() blocks — ticker may overwrite input while dialog is open
+        // Snapshot price immediately — before anything async or blocking
         const price = parseFloat(priceEl.value);
         if (!price || price <= 0) {
           alert('Please enter a valid limit price.');
@@ -1224,9 +1226,8 @@
         const tp  = side === 'BUY' ? price + TP_OFFSET : price - TP_OFFSET;
         const sl  = side === 'BUY' ? price - SL_OFFSET : price + SL_OFFSET;
 
-        // ② Pause live price so confirm dialog shows stable numbers
-        const wasLive = _livePriceOn;
-        _livePriceOn  = false;
+        // Lock ticker from touching inputs for entire order flow
+        _orderInProgress = true;
 
         const ok = confirm(
           `Confirm ${side} ORDER\n\n` +
@@ -1238,12 +1239,12 @@
           `SL      : $${fmt(sl)}  (-${SL_OFFSET})\n\nProceed?`
         );
 
-        // ③ Restore live price regardless of confirm result
-        _livePriceOn = wasLive;
+        if (!ok) {
+          _orderInProgress = false;  // cancelled — release lock
+          return;
+        }
 
-        if (!ok) return;
-
-        // ④ Brief visual feedback
+        // Brief visual feedback
         const activeBtn = document.getElementById('btn-' + side.toLowerCase());
         const origText  = activeBtn.textContent;
         activeBtn.textContent   = side === 'BUY' ? '▲ SENT...' : '▼ SENT...';
@@ -1253,7 +1254,6 @@
           activeBtn.style.opacity = '1';
         }, 800);
 
-        // ⑤ Send using snapshotted price — never re-read from input
         const body = new URLSearchParams({
           side:        side,
           limit_price: price,
@@ -1273,6 +1273,8 @@
           appendLine({ ts: now(), level: 'ERROR', msg: 'Failed to send order: ' + e });
           activeBtn.textContent   = origText;
           activeBtn.style.opacity = '1';
+        } finally {
+          _orderInProgress = false;  // always release lock after fetch completes
         }
       }
 
@@ -1325,28 +1327,28 @@
       terminal.scrollTop = terminal.scrollHeight;
 
       /* ── Live price ticker ── */
-      let _currentPrice = 0;
-      let _livePriceOn  = true;  // controlled by checkbox
+      let _currentPrice   = 0;
+      let _livePriceOn    = true;   // controlled by checkbox
+      let _orderInProgress = false; // hard block during order flow
+
+      function setLiveUI(on) {
+        const dot = document.getElementById('live-dot');
+        const val = document.getElementById('live-price-val');
+        const lbl = document.getElementById('live-label');
+        const chk = document.getElementById('chk-live');
+        chk.checked = on;
+        if (on) {
+          dot.classList.remove('off'); val.classList.remove('off'); lbl.style.color = '';
+        } else {
+          dot.classList.add('off');    val.classList.add('off');    lbl.style.color = 'var(--muted)';
+        }
+      }
 
       function toggleLivePrice() {
-        const chk   = document.getElementById('chk-live');
-        // If called from label click (not directly from checkbox), toggle manually
+        const chk = document.getElementById('chk-live');
         if (event.target !== chk) chk.checked = !chk.checked;
         _livePriceOn = chk.checked;
-
-        const dot   = document.getElementById('live-dot');
-        const lbl   = document.getElementById('live-label');
-        const val   = document.getElementById('live-price-val');
-
-        if (_livePriceOn) {
-          dot.classList.remove('off');
-          val.classList.remove('off');
-          lbl.style.color = '';
-        } else {
-          dot.classList.add('off');
-          val.classList.add('off');
-          lbl.style.color = 'var(--muted)';
-        }
+        setLiveUI(_livePriceOn);
       }
 
       async function fetchTicker() {
@@ -1354,46 +1356,36 @@
           const res  = await fetch('/ticker');
           const data = await res.json();
           if (!data.price || data.price <= 0) return;
-          const p   = data.price;
-          _currentPrice = p;
-          const fmt = p.toFixed(2);
+          _currentPrice = data.price;
+          const f = data.price.toFixed(2);
 
-          // Always show live price in the indicator
-          document.getElementById('live-price-val').textContent = '$' + fmt;
+          document.getElementById('live-price-val').textContent = '$' + f;
 
-          // Only update inputs if live-price is ON (checkbox checked)
-          if (!_livePriceOn) return;
+          // Hard block: never touch inputs while order confirm or fetch is in progress
+          if (!_livePriceOn || _orderInProgress) return;
 
           const buyEl  = document.getElementById('buy_price');
           const sellEl = document.getElementById('sell_price');
-
-          buyEl.placeholder  = fmt;
-          sellEl.placeholder = fmt;
-          buyEl.value  = fmt;
-          sellEl.value = fmt;
+          buyEl.placeholder  = f;
+          sellEl.placeholder = f;
+          buyEl.value  = f;
+          sellEl.value = f;
           updatePreview('buy');
           updatePreview('sell');
         } catch(_) {}
+        // Reschedule — recursive setTimeout is safer than setInterval over long sessions
+        setTimeout(fetchTicker, 1000);
       }
 
-      fetchTicker();
-      setInterval(fetchTicker, 1000);
+      // Kick off ticker (no setInterval — uses recursive setTimeout)
+      setTimeout(fetchTicker, 100);
 
       /* ── Ctrl+Space shortcut → toggle live price ── */
       document.addEventListener('keydown', (e) => {
         if (e.ctrlKey && e.code === 'Space') {
           e.preventDefault();
-          const chk = document.getElementById('chk-live');
-          chk.checked = !chk.checked;
-          _livePriceOn = chk.checked;
-          const dot = document.getElementById('live-dot');
-          const val = document.getElementById('live-price-val');
-          const lbl = document.getElementById('live-label');
-          if (_livePriceOn) {
-            dot.classList.remove('off'); val.classList.remove('off'); lbl.style.color = '';
-          } else {
-            dot.classList.add('off'); val.classList.add('off'); lbl.style.color = 'var(--muted)';
-          }
+          _livePriceOn = !_livePriceOn;
+          setLiveUI(_livePriceOn);
         }
       });
 
