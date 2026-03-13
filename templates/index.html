@@ -557,8 +557,7 @@
         overflow-y: auto;
         font-family: var(--mono);
         font-size: 12.5px;
-        line-height: 1.7;
-        scroll-behavior: smooth;
+        line-height: 1.7; /* scroll-behavior: instant */
       }
       .terminal-body::-webkit-scrollbar {
         width: 6px;
@@ -656,6 +655,7 @@
         color: var(--muted);
         cursor: pointer;
         user-select: none;
+        margin-left: auto;
       }
       .price-live-toggle input[type="checkbox"] {
         appearance: none;
@@ -925,21 +925,24 @@
         <h1>TGC <em>Algo</em></h1>
         <div class="logo">BINANCE <span>FUTURES</span> / USDT-M</div>
         <!-- <div class="badge">LIVE</div> -->
-        <!-- Live price toggle -->
-        <div class="meta-item price-live-toggle" onclick="toggleLivePrice()">
-          <div class="live-dot" id="live-dot"></div>
-          <span id="live-price-val" class="live-price-val">—</span>
-          <input
-            type="checkbox"
-            id="chk-live"
-            checked
-            onclick="
-              event.stopPropagation();
-              toggleLivePrice();
-            "
-            title="Auto-update price inputs with live mark price"
-          />
-          <span id="live-label">LIVE PRICE</span>
+        <div>
+          <!-- Live price toggle -->
+          <!-- <div class="meta-item price-live-toggle" style="margin-left:auto" onclick="toggleLivePrice()"> -->
+          <div class="meta-item price-live-toggle" onclick="toggleLivePrice()">
+            <div class="live-dot" id="live-dot"></div>
+            <span id="live-price-val" class="live-price-val">—</span>
+            <input
+              type="checkbox"
+              id="chk-live"
+              checked
+              onclick="
+                event.stopPropagation();
+                toggleLivePrice();
+              "
+              title="Auto-update price inputs with live mark price"
+            />
+            <span id="live-label">LIVE PRICE</span>
+          </div>
         </div>
       </header>
 
@@ -1208,7 +1211,9 @@
       /* ── AJAX order submission — no page reload ── */
       async function placeOrder(side) {
         const priceEl = document.getElementById(side.toLowerCase() + '_price');
-        const price   = parseFloat(priceEl.value);
+
+        // ① Snapshot price BEFORE confirm() blocks — ticker may overwrite input while dialog is open
+        const price = parseFloat(priceEl.value);
         if (!price || price <= 0) {
           alert('Please enter a valid limit price.');
           return;
@@ -1216,7 +1221,12 @@
         const qty = (AMOUNT * LEVERAGE) / price;
         const tp  = side === 'BUY' ? price + TP_OFFSET : price - TP_OFFSET;
         const sl  = side === 'BUY' ? price - SL_OFFSET : price + SL_OFFSET;
-        const ok  = confirm(
+
+        // ② Pause live price so confirm dialog shows stable numbers
+        const wasLive = _livePriceOn;
+        _livePriceOn  = false;
+
+        const ok = confirm(
           `Confirm ${side} ORDER\n\n` +
           `Symbol  : BTCUSDT\n` +
           `Margin  : $${fmt(AMOUNT)} USDT\n` +
@@ -1225,21 +1235,23 @@
           `TP      : $${fmt(tp)}  (+${TP_OFFSET})\n` +
           `SL      : $${fmt(sl)}  (-${SL_OFFSET})\n\nProceed?`
         );
+
+        // ③ Restore live price regardless of confirm result
+        _livePriceOn = wasLive;
+
         if (!ok) return;
 
-        const btnBuy  = document.getElementById('btn-buy');
-        const btnSell = document.getElementById('btn-sell');
-
-        // Brief visual feedback then immediately restore — order runs in background
+        // ④ Brief visual feedback
         const activeBtn = document.getElementById('btn-' + side.toLowerCase());
         const origText  = activeBtn.textContent;
-        activeBtn.textContent = side === 'BUY' ? '▲ SENT...' : '▼ SENT...';
+        activeBtn.textContent   = side === 'BUY' ? '▲ SENT...' : '▼ SENT...';
         activeBtn.style.opacity = '0.7';
         setTimeout(() => {
           activeBtn.textContent   = origText;
           activeBtn.style.opacity = '1';
         }, 800);
 
+        // ⑤ Send using snapshotted price — never re-read from input
         const body = new URLSearchParams({
           side:        side,
           limit_price: price,
@@ -1249,11 +1261,11 @@
         });
 
         try {
-          const res = await fetch('/place-order', { method: 'POST', body });
+          const res  = await fetch('/place-order', { method: 'POST', body });
           const data = await res.json();
           if (data.status === 'started') {
-            priceEl.value = '';
-            updatePreview(side.toLowerCase());
+            appendLine({ ts: now(), level: 'SUCCESS',
+              msg: `▶ ${side} order sent @ $${fmt(price)} | TP:$${fmt(tp)} SL:$${fmt(sl)}` });
           }
         } catch(e) {
           appendLine({ ts: now(), level: 'ERROR', msg: 'Failed to send order: ' + e });
