@@ -159,7 +159,7 @@
         color: var(--buy);
         font-family: var(--mono);
         font-size: 12px;
-        width: 100px; /* ← 100px as requested */
+        width: 70px; /* ← 100px as requested */
         text-align: right;
         padding: 0;
         -moz-appearance: textfield;
@@ -924,26 +924,7 @@
       <header>
         <h1>TGC <em>Algo</em></h1>
         <div class="logo">BINANCE <span>FUTURES</span> / USDT-M</div>
-        <!-- <div class="badge">LIVE</div> -->
-        <div>
-          <!-- Live price toggle -->
-          <!-- <div class="meta-item price-live-toggle" style="margin-left:auto" onclick="toggleLivePrice()"> -->
-          <div class="meta-item price-live-toggle" onclick="toggleLivePrice()">
-            <div class="live-dot" id="live-dot"></div>
-            <span id="live-price-val" class="live-price-val">—</span>
-            <input
-              type="checkbox"
-              id="chk-live"
-              checked
-              onclick="
-                event.stopPropagation();
-                toggleLivePrice();
-              "
-              title="Auto-update price inputs with live mark price"
-            />
-            <span id="live-label">LIVE PRICE</span>
-          </div>
-        </div>
+        <div class="badge">LIVE</div>
       </header>
 
       <!-- Meta strip with editable MARGIN, TP OFFSET, SL OFFSET -->
@@ -1001,6 +982,27 @@
               title="Stop Loss offset in USDT"
             />
           </div>
+        </div>
+
+        <!-- Live price toggle -->
+        <div
+          class="meta-item price-live-toggle"
+          style="margin-left: auto"
+          onclick="toggleLivePrice()"
+        >
+          <div class="live-dot" id="live-dot"></div>
+          <span id="live-price-val" class="live-price-val">—</span>
+          <input
+            type="checkbox"
+            id="chk-live"
+            checked
+            onclick="
+              event.stopPropagation();
+              toggleLivePrice();
+            "
+            title="Auto-update price inputs with live mark price"
+          />
+          <!-- <span id="live-label">LIVE PRICE</span> -->
         </div>
       </div>
 

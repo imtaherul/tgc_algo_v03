@@ -18,6 +18,15 @@ from keys import api, secret
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
+# ── Suppress noisy polling routes from uvicorn access log ─────
+class _SuppressPolling(logging.Filter):
+    _MUTED = {"/ticker", "/open-orders", "/open-positions", "/logs/stream"}
+    def filter(self, record: logging.LogRecord) -> bool:
+        msg = record.getMessage()
+        return not any(p in msg for p in self._MUTED)
+
+logging.getLogger("uvicorn.access").addFilter(_SuppressPolling())
+
 app = FastAPI(title="Binance Futures Trader")
 templates = Jinja2Templates(directory="templates")
 
