@@ -1399,8 +1399,7 @@
           const data = await res.json();
           renderOrders(data.regular || [], data.algo || []);
         } catch(e) {
-          document.getElementById('orders-body').innerHTML =
-            '<div class="orders-empty">Failed to load orders.</div>';
+          // keep last known data on timeout/error
         } finally {
           btn.classList.remove('spinning');
           btn.disabled = false;
@@ -1503,10 +1502,10 @@
         try {
           const res  = await fetch('/open-positions');
           const data = await res.json();
-          renderPositions(data.positions || []);
+          if (!data.timeout) renderPositions(data.positions || []);
+          // On timeout: keep showing last known data
         } catch(e) {
-          document.getElementById('positions-body').innerHTML =
-            '<div class="orders-empty">Failed to load positions.</div>';
+          // keep last known data on timeout/error
         } finally {
           btn.classList.remove('spinning');
           btn.disabled = false;
@@ -1538,8 +1537,9 @@
           const leverage  = p.leverage || '—';
           const symbol    = p.symbol   || '{{ cfg_symbol }}';
 
+          const posSide = p.positionSide || (amt > 0 ? 'LONG' : 'SHORT');
           rows += `<tr>
-            <td><span class="${sideClass}">${sideLabel}</span></td>
+            <td><span class="${sideClass}">${sideLabel}<br><span style="font-size:9px;opacity:.6">${posSide}</span></span></td>
             <td>${symbol}</td>
             <td>${leverage}×</td>
             <td>${absAmt} BTC</td>
@@ -1549,7 +1549,7 @@
             <td class="${pnlClass}">${pnlSign}$${pnl.toFixed(2)}</td>
             <td>
               <button class="btn-close-pos"
-                onclick="closePosition('${symbol}','${side}','${absAmt}',this)">
+                onclick="closePosition('${symbol}','${side}','${absAmt}','${posSide}',this)">
                 ⚡ CLOSE
               </button>
             </td>
@@ -1568,11 +1568,11 @@
           </div>`;
       }
 
-      async function closePosition(symbol, side, quantity, btn) {
-        if (!confirm(`MARKET CLOSE ${side} ${quantity} ${symbol}?\n\nThis will close the position immediately at market price.`)) return;
+      async function closePosition(symbol, side, quantity, positionSide, btn) {
+        if (!confirm(`MARKET CLOSE ${positionSide} ${quantity} ${symbol}?\n\nThis will close the position immediately at market price.`)) return;
         btn.disabled = true;
         btn.textContent = 'CLOSING...';
-        const body = new URLSearchParams({ symbol, side, quantity });
+        const body = new URLSearchParams({ symbol, side, quantity, position_side: positionSide });
         try {
           const res  = await fetch('/close-position', { method: 'POST', body });
           const data = await res.json();
@@ -1592,11 +1592,11 @@
       }
 
       loadPositions();
-      setInterval(loadPositions, 1000);
+      setInterval(loadPositions, 5000);  // 5s — data comes from server cache
 
       // Load orders on page load and after placing an order
       loadOrders();
-      setInterval(loadOrders, 1000); // auto-refresh every 1s
+      setInterval(loadOrders, 5000);    // 5s — data comes from server cache
     </script>
   </body>
 </html>
