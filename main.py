@@ -164,19 +164,23 @@ def position_monitor():
 
 # ── Order execution (Hedge Mode) ───────────────────────────────
 def run_order(side: str, limit_price: float, amount: float,
-              tp_offset: float, sl_offset: float):
-    client      = get_client()
-    quantity    = amount * LEVERAGE / limit_price
+              tp_offset: float, sl_offset: float,
+              sym: str = None, lev: int = None):
+    # Use per-order symbol/leverage if provided, else fall back to global config
+    sym      = sym or SYMBOL
+    lev      = lev or LEVERAGE
+    client   = get_client()
+    quantity    = amount * lev / limit_price
     take_profit = limit_price + tp_offset if side == "BUY" else limit_price - tp_offset
     stop_loss   = limit_price - sl_offset if side == "BUY" else limit_price + sl_offset
-    pos_side    = position_side(side)   # "LONG" or "SHORT"
-    exit_s      = exit_side(side)       # "SELL" or "BUY"
+    pos_side    = position_side(side)
+    exit_s      = exit_side(side)
 
     push_log("INFO",  "─" * 44)
     push_log("INFO",  f"▶ Starting {side} order sequence [HEDGE MODE]")
-    push_log("INFO",  f"  Symbol      : {SYMBOL}")
+    push_log("INFO",  f"  Symbol      : {sym}")
     push_log("INFO",  f"  PositionSide: {pos_side}")
-    push_log("INFO",  f"  Margin      : ${amount} USDT  |  Leverage: {LEVERAGE}x")
+    push_log("INFO",  f"  Margin      : ${amount} USDT  |  Leverage: {lev}x")
     push_log("INFO",  f"  Entry       : ${fmt_price(limit_price)}")
     push_log("INFO",  f"  Quantity    : {fmt_qty(quantity)} BTC")
     push_log("INFO",  f"  TP target   : ${fmt_price(take_profit)}  (+{tp_offset})")
@@ -186,13 +190,13 @@ def run_order(side: str, limit_price: float, amount: float,
     try:
         # Step 1: Set leverage for the specific position side
         push_log("INFO", "⚙  [1/4] Setting leverage...")
-        resp = client.change_leverage(symbol=SYMBOL, leverage=LEVERAGE)
+        resp = client.change_leverage(symbol=sym, leverage=lev)
         push_log("SUCCESS", f"✓  Leverage set to {resp['leverage']}x for {resp['symbol']}")
 
         # Step 2: Place limit entry — hedge mode requires positionSide
         push_log("INFO", f"📤 [2/4] Placing LIMIT {side} {pos_side} @ ${fmt_price(limit_price)} | qty: {fmt_qty(quantity)}")
         entry = client.new_order(
-            symbol=SYMBOL,
+            symbol=sym,
             side=side,
             positionSide=pos_side,      # ← hedge mode key field
             type="LIMIT",
@@ -208,7 +212,7 @@ def run_order(side: str, limit_price: float, amount: float,
         attempt = 0
         while True:
             attempt += 1
-            order  = client.query_order(symbol=SYMBOL, orderId=entry_id)
+            order  = client.query_order(symbol=sym, orderId=entry_id)
             status = order["status"]
             filled = float(order.get("executedQty", 0))
             push_log("INFO", f"   Poll #{attempt} → status: {status}  filled: {filled}/{fmt_qty(quantity)} BTC")
@@ -230,9 +234,9 @@ def run_order(side: str, limit_price: float, amount: float,
 
         push_log("INFO", f"   → TP: TAKE_PROFIT {exit_s} {pos_side} | trigger: ${fmt_price(take_profit)} | exec: ${fmt_price(tp_exec)}")
         tp = signed_request(client, "POST", "/fapi/v1/algoOrder", {
-            "symbol":       SYMBOL,
+            "symbol":       sym,
             "side":         exit_s,
-            "positionSide": pos_side,   # hedge mode: LONG or SHORT
+            "positionSide": pos_side,
             "algoType":     "CONDITIONAL",
             "type":         "TAKE_PROFIT",
             "quantity":     fmt_qty(quantity),
@@ -240,16 +244,15 @@ def run_order(side: str, limit_price: float, amount: float,
             "triggerPrice": fmt_price(take_profit),
             "timeInForce":  "GTC",
             "workingType":  WORKING_TYPE,
-            # reduceOnly omitted — not allowed in hedge mode
         })
         tp_id = tp.get("algoId", "?")
         push_log("SUCCESS", f"✓  Take Profit placed | trigger: ${fmt_price(take_profit)} — algoId: {tp_id}")
 
         push_log("INFO", f"   → SL: STOP {exit_s} {pos_side} | trigger: ${fmt_price(stop_loss)} | exec: ${fmt_price(sl_exec)}")
         sl = signed_request(client, "POST", "/fapi/v1/algoOrder", {
-            "symbol":       SYMBOL,
+            "symbol":       sym,
             "side":         exit_s,
-            "positionSide": pos_side,   # hedge mode: LONG or SHORT
+            "positionSide": pos_side,
             "algoType":     "CONDITIONAL",
             "type":         "STOP",
             "quantity":     fmt_qty(quantity),
@@ -257,7 +260,6 @@ def run_order(side: str, limit_price: float, amount: float,
             "triggerPrice": fmt_price(stop_loss),
             "timeInForce":  "GTC",
             "workingType":  WORKING_TYPE,
-            # reduceOnly omitted — not allowed in hedge mode
         })
         sl_id = sl.get("algoId", "?")
         push_log("SUCCESS", f"✓  Stop Loss placed   | trigger: ${fmt_price(stop_loss)} — algoId: {sl_id}")
@@ -301,12 +303,16 @@ async def place_order(
     margin:      float = Form(default=0),
     tp_offset:   float = Form(default=0),
     sl_offset:   float = Form(default=0),
+    symbol:      str   = Form(default=""),
+    leverage:    int   = Form(default=0),
 ):
-    amount = margin    if margin    > 0 else AMOUNT
-    tp     = tp_offset if tp_offset > 0 else TP_OFFSET
-    sl     = sl_offset if sl_offset > 0 else SL_OFFSET
-    threading.Thread(target=run_order, args=(side, limit_price, amount, tp, sl), daemon=True).start()
-    return JSONResponse({"status": "started", "side": side, "price": limit_price})
+    amount   = margin    if margin    > 0  else AMOUNT
+    tp       = tp_offset if tp_offset > 0  else TP_OFFSET
+    sl       = sl_offset if sl_offset > 0  else SL_OFFSET
+    sym      = symbol.strip().upper()  if symbol.strip()  else SYMBOL
+    lev      = leverage                if leverage >= 1   else LEVERAGE
+    threading.Thread(target=run_order, args=(side, limit_price, amount, tp, sl, sym, lev), daemon=True).start()
+    return JSONResponse({"status": "started", "side": side, "price": limit_price, "symbol": sym})
 
 @app.get("/open-orders")
 async def open_orders():
@@ -381,12 +387,12 @@ async def close_position(
         return JSONResponse({"status": "error", "msg": str(e)}, status_code=400)
 
 @app.get("/ticker")
-async def ticker():
+async def ticker(symbol: str = SYMBOL):
     client = get_client()
     try:
-        data  = client.mark_price(symbol=SYMBOL)
+        data  = client.mark_price(symbol=symbol)
         price = float(data.get("markPrice", 0))
-        return JSONResponse({"price": price, "symbol": SYMBOL})
+        return JSONResponse({"price": price, "symbol": symbol})
     except Exception as e:
         return JSONResponse({"price": 0, "error": str(e)}, status_code=500)
 

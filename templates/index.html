@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>TGC Algo</title>
+    <title>TGC Algo </title>
     <link
       href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Syne:wght@400;700;800&display=swap"
       rel="stylesheet"
@@ -121,7 +121,6 @@
         margin-left: 6px;
       }
 
-      /* shared editable meta field style */
       .meta-item.editable {
         display: flex;
         align-items: center;
@@ -151,7 +150,6 @@
         margin-left: 2px;
       }
 
-      /* all three editable inputs: margin, tp, sl */
       .meta-field-wrap input[type="number"] {
         background: transparent;
         border: none;
@@ -159,18 +157,49 @@
         color: var(--buy);
         font-family: var(--mono);
         font-size: 12px;
-        width: 70px; /* ← 100px as requested */
+        width: 50px;
         text-align: right;
         padding: 0;
         -moz-appearance: textfield;
         caret-color: var(--buy);
-        /* override the global input styles */
         border-radius: 0 !important;
         box-shadow: none !important;
       }
       .meta-field-wrap input[type="number"]::-webkit-inner-spin-button,
       .meta-field-wrap input[type="number"]::-webkit-outer-spin-button {
         -webkit-appearance: none;
+      }
+
+      .meta-field-wrap input[type="text"] {
+        background: transparent;
+        border: none;
+        outline: none;
+        color: var(--buy);
+        font-family: var(--mono);
+        font-size: 12px;
+        width: 80px;
+        text-align: right;
+        padding: 0;
+        caret-color: var(--buy);
+        text-transform: uppercase;
+        border-radius: 0 !important;
+        box-shadow: none !important;
+      }
+
+      .meta-field-wrap select {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        outline: none;
+        color: var(--buy);
+        font-family: var(--mono);
+        font-size: 12px;
+        padding: 2px 4px;
+        cursor: pointer;
+      }
+      .meta-field-wrap select option {
+        background: var(--surface);
+        color: var(--text);
       }
 
       /* ── Grid ── */
@@ -270,7 +299,6 @@
         margin-bottom: 8px;
         text-transform: uppercase;
       }
-      /* Main price input — full-width big style */
       .price-input {
         width: 100%;
         background: var(--bg);
@@ -557,7 +585,7 @@
         overflow-y: auto;
         font-family: var(--mono);
         font-size: 12.5px;
-        line-height: 1.7; /* scroll-behavior: instant */
+        line-height: 1.7;
       }
       .terminal-body::-webkit-scrollbar {
         width: 6px;
@@ -927,25 +955,34 @@
         <div class="badge">LIVE</div>
       </header>
 
-      <!-- Meta strip with editable MARGIN, TP OFFSET, SL OFFSET -->
+      <!-- Meta strip -->
       <div class="meta">
-        <div class="meta-item">SYMBOL<span>{{ cfg_symbol }}</span></div>
-        <div class="meta-item">LEVERAGE<span>{{ cfg_leverage }}×</span></div>
+        <!-- Editable Symbol -->
+        <div class="meta-item editable">
+          <span class="meta-lbl">SYMBOL</span>
+          <div class="meta-field-wrap" style="border-bottom: none; margin-left: 6px">
+            <select id="meta-symbol" onchange="onSymbolChange()">
+              <option value="BTCUSDT" {{ 'selected' if cfg_symbol == 'BTCUSDT' }}>BTCUSDT</option>
+              <option value="ETHUSDT" {{ 'selected' if cfg_symbol == 'ETHUSDT' }}>ETHUSDT</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Editable Leverage -->
+        <div class="meta-item editable">
+          <span class="meta-lbl">LEVERAGE</span>
+          <div class="meta-field-wrap">
+            <input type="number" id="meta-leverage" value="{{ cfg_leverage }}" min="1" max="125" step="1" oninput="onSettingChange()" title="Leverage 1-125x" />
+            <span class="suffix">×</span>
+          </div>
+        </div>
 
         <!-- Editable Margin -->
         <div class="meta-item editable">
           <span class="meta-lbl">MARGIN</span>
           <div class="meta-field-wrap">
             <span class="prefix">$</span>
-            <input
-              type="number"
-              id="meta-margin"
-              value="{{ cfg_amount }}"
-              min="1"
-              step="1"
-              oninput="onSettingChange()"
-              title="Margin in USDT"
-            />
+            <input type="number" id="meta-margin" value="{{ cfg_amount }}" min="1" step="1" oninput="onSettingChange()" title="Margin in USDT" />
             <span class="suffix">USDT</span>
           </div>
         </div>
@@ -955,15 +992,7 @@
           <span class="meta-lbl">TP OFFSET</span>
           <div class="meta-field-wrap">
             <span class="prefix">±</span>
-            <input
-              type="number"
-              id="meta-tp"
-              value="{{ cfg_tp }}"
-              min="1"
-              step="1"
-              oninput="onSettingChange()"
-              title="Take Profit offset in USDT"
-            />
+            <input type="number" id="meta-tp" value="{{ cfg_tp }}" min="1" step="1" oninput="onSettingChange()" title="Take Profit offset in USDT" />
           </div>
         </div>
 
@@ -972,37 +1001,15 @@
           <span class="meta-lbl">SL OFFSET</span>
           <div class="meta-field-wrap">
             <span class="prefix">±</span>
-            <input
-              type="number"
-              id="meta-sl"
-              value="{{ cfg_sl }}"
-              min="1"
-              step="1"
-              oninput="onSettingChange()"
-              title="Stop Loss offset in USDT"
-            />
+            <input type="number" id="meta-sl" value="{{ cfg_sl }}" min="1" step="1" oninput="onSettingChange()" title="Stop Loss offset in USDT" />
           </div>
         </div>
 
         <!-- Live price toggle -->
-        <div
-          class="meta-item price-live-toggle"
-          style="margin-left: auto"
-          onclick="toggleLivePrice()"
-        >
+        <div class="meta-item price-live-toggle" style="margin-left: auto" onclick="toggleLivePrice()">
           <div class="live-dot" id="live-dot"></div>
-          <input
-            type="checkbox"
-            id="chk-live"
-            checked
-            onclick="
-              event.stopPropagation();
-              toggleLivePrice();
-            "
-            title="Auto-update price inputs with live mark price"
-          />
+          <input type="checkbox" id="chk-live" checked onclick="event.stopPropagation(); toggleLivePrice();" title="Auto-update price inputs with live mark price" />
           <span id="live-price-val" class="live-price-val">—</span>
-          <!-- <span id="live-label">LIVE PRICE</span> -->
         </div>
       </div>
 
@@ -1017,37 +1024,23 @@
           </div>
           <div class="field">
             <label>Limit Entry Price (USDT)</label>
-            <input
-              class="price-input"
-              type="number"
-              id="buy_price"
-              placeholder=""
-              step="0.01"
-              min="1"
-              oninput="updatePreview('buy')"
-            />
+            <input class="price-input" type="number" id="buy_price" placeholder="" step="0.01" min="1" oninput="updatePreview('buy')" />
           </div>
           <div class="preview">
             <div class="preview-item">
-              <span class="lbl">TAKE PROFIT</span
-              ><span class="val tp-val" id="buy_tp">—</span>
+              <span class="lbl">TAKE PROFIT</span><span class="val tp-val" id="buy_tp">—</span>
             </div>
             <div class="preview-item">
-              <span class="lbl">STOP LOSS</span
-              ><span class="val sl-val" id="buy_sl">—</span>
+              <span class="lbl">STOP LOSS</span><span class="val sl-val" id="buy_sl">—</span>
             </div>
             <div class="preview-item">
-              <span class="lbl">QTY (BTC)</span
-              ><span class="val" id="buy_qty">—</span>
+              <span class="lbl">QTY</span><span class="val" id="buy_qty">—</span>
             </div>
             <div class="preview-item">
-              <span class="lbl">NOTIONAL</span
-              ><span class="val" id="buy_notional">—</span>
+              <span class="lbl">NOTIONAL</span><span class="val" id="buy_notional">—</span>
             </div>
           </div>
-          <button class="btn-buy" id="btn-buy" onclick="placeOrder('BUY')">
-            ▲ PLACE BUY ORDER
-          </button>
+          <button class="btn-buy" id="btn-buy" onclick="placeOrder('BUY')">▲ PLACE BUY ORDER</button>
         </div>
 
         <!-- SELL -->
@@ -1059,37 +1052,23 @@
           </div>
           <div class="field">
             <label>Limit Entry Price (USDT)</label>
-            <input
-              class="price-input"
-              type="number"
-              id="sell_price"
-              placeholder=""
-              step="0.01"
-              min="1"
-              oninput="updatePreview('sell')"
-            />
+            <input class="price-input" type="number" id="sell_price" placeholder="" step="0.01" min="1" oninput="updatePreview('sell')" />
           </div>
           <div class="preview">
             <div class="preview-item">
-              <span class="lbl">TAKE PROFIT</span
-              ><span class="val tp-val" id="sell_tp">—</span>
+              <span class="lbl">TAKE PROFIT</span><span class="val tp-val" id="sell_tp">—</span>
             </div>
             <div class="preview-item">
-              <span class="lbl">STOP LOSS</span
-              ><span class="val sl-val" id="sell_sl">—</span>
+              <span class="lbl">STOP LOSS</span><span class="val sl-val" id="sell_sl">—</span>
             </div>
             <div class="preview-item">
-              <span class="lbl">QTY (BTC)</span
-              ><span class="val" id="sell_qty">—</span>
+              <span class="lbl">QTY</span><span class="val" id="sell_qty">—</span>
             </div>
             <div class="preview-item">
-              <span class="lbl">NOTIONAL</span
-              ><span class="val" id="sell_notional">—</span>
+              <span class="lbl">NOTIONAL</span><span class="val" id="sell_notional">—</span>
             </div>
           </div>
-          <button class="btn-sell" id="btn-sell" onclick="placeOrder('SELL')">
-            ▼ PLACE SELL ORDER
-          </button>
+          <button class="btn-sell" id="btn-sell" onclick="placeOrder('SELL')">▼ PLACE SELL ORDER</button>
         </div>
       </div>
 
@@ -1098,8 +1077,7 @@
         <div class="terminal-header">
           <div class="terminal-title">
             <div class="terminal-dots">
-              <span class="d1"></span><span class="d2"></span
-              ><span class="d3"></span>
+              <span class="d1"></span><span class="d2"></span><span class="d3"></span>
             </div>
             trader@binance-futures ~ /logs
           </div>
@@ -1110,13 +1088,15 @@
           </div>
         </div>
         <div class="terminal-body" id="terminal">
-          {% if initial_logs %} {% for entry in initial_logs %}
-          <div class="log-line lvl-{{ entry.level }}">
-            <span class="log-ts">{{ entry.ts }}</span>
-            <span class="log-lvl lvl-{{ entry.level }}">{{ entry.level }}</span>
-            <span class="log-msg">{{ entry.msg }}</span>
-          </div>
-          {% endfor %} {% else %}
+          {% if initial_logs %}
+            {% for entry in initial_logs %}
+            <div class="log-line lvl-{{ entry.level }}">
+              <span class="log-ts">{{ entry.ts }}</span>
+              <span class="log-lvl lvl-{{ entry.level }}">{{ entry.level }}</span>
+              <span class="log-msg">{{ entry.msg }}</span>
+            </div>
+            {% endfor %}
+          {% else %}
           <div class="terminal-empty" id="empty-msg">
             Waiting for activity...<span class="terminal-caret"></span>
           </div>
@@ -1131,13 +1111,7 @@
             OPEN POSITIONS
             <span class="orders-count" id="positions-count">0</span>
           </div>
-          <button
-            class="btn-refresh"
-            id="btn-refresh-pos"
-            onclick="loadPositions()"
-          >
-            ↻ REFRESH
-          </button>
+          <button class="btn-refresh" id="btn-refresh-pos" onclick="loadPositions()">↻ REFRESH</button>
         </div>
         <div id="positions-body">
           <div class="orders-empty">Loading positions...</div>
@@ -1151,9 +1125,7 @@
             OPEN ORDERS
             <span class="orders-count" id="orders-count">0</span>
           </div>
-          <button class="btn-refresh" id="btn-refresh" onclick="loadOrders()">
-            ↻ REFRESH
-          </button>
+          <button class="btn-refresh" id="btn-refresh" onclick="loadOrders()">↻ REFRESH</button>
         </div>
         <div id="orders-body">
           <div class="orders-empty">Loading orders...</div>
@@ -1161,34 +1133,51 @@
       </div>
 
       <footer>
-        <div>
-          {{ cfg_symbol }} · USDT-M PERPETUAL · {{ cfg_leverage }}× LEVERAGE ·
-          MARK PRICE · closePosition=true
-        </div>
+        <div id="footer-text">{{ cfg_symbol }} · USDT-M PERPETUAL · {{ cfg_leverage }}× LEVERAGE · MARK PRICE · closePosition=true</div>
         <div>Technical Ghost Chittagong</div>
       </footer>
     </div>
 
     <script>
-      const LEVERAGE = {{ cfg_leverage }};
-      let AMOUNT    = {{ cfg_amount }};
-      let TP_OFFSET = {{ cfg_tp }};
-      let SL_OFFSET = {{ cfg_sl }};
+      // ── Global state ──────────────────────────────────────────
+      let LEVERAGE_VAL = {{ cfg_leverage }};
+      let SYMBOL_VAL   = '{{ cfg_symbol }}';
+      let AMOUNT       = {{ cfg_amount }};
+      let TP_OFFSET    = {{ cfg_tp }};
+      let SL_OFFSET    = {{ cfg_sl }};
 
       const terminal    = document.getElementById('terminal');
       const statusDot   = document.getElementById('status-dot');
       const statusLabel = document.getElementById('status-label');
 
-      /* ── Settings ── */
+      // ── Settings change ───────────────────────────────────────
       function onSettingChange() {
-        const m = parseFloat(document.getElementById('meta-margin').value);
-        const t = parseFloat(document.getElementById('meta-tp').value);
-        const s = parseFloat(document.getElementById('meta-sl').value);
-        if (!isNaN(m) && m > 0) AMOUNT    = m;
-        if (!isNaN(t) && t > 0) TP_OFFSET = t;
-        if (!isNaN(s) && s > 0) SL_OFFSET = s;
+        const m  = parseFloat(document.getElementById('meta-margin').value);
+        const t  = parseFloat(document.getElementById('meta-tp').value);
+        const s  = parseFloat(document.getElementById('meta-sl').value);
+        const lv = parseFloat(document.getElementById('meta-leverage').value);
+        if (!isNaN(m)  && m  > 0)  AMOUNT       = m;
+        if (!isNaN(t)  && t  > 0)  TP_OFFSET    = t;
+        if (!isNaN(s)  && s  > 0)  SL_OFFSET    = s;
+        if (!isNaN(lv) && lv >= 1) LEVERAGE_VAL = lv;
         updatePreview('buy');
         updatePreview('sell');
+      }
+
+      // ── Symbol change — update label, clear prices, fetch new ticker ──
+      function onSymbolChange() {
+        SYMBOL_VAL = document.getElementById('meta-symbol').value;
+        // Clear price inputs so stale price from old symbol isn't shown
+        document.getElementById('buy_price').value  = '';
+        document.getElementById('sell_price').value = '';
+        document.getElementById('live-price-val').textContent = '—';
+        updatePreview('buy');
+        updatePreview('sell');
+        // Update footer
+        document.getElementById('footer-text').textContent =
+          SYMBOL_VAL + ' · USDT-M PERPETUAL · ' + LEVERAGE_VAL + '× LEVERAGE · MARK PRICE · closePosition=true';
+        // Immediately fetch new price
+        fetchTicker();
       }
 
       function fmt(n, dec=2) {
@@ -1196,55 +1185,53 @@
       }
 
       function updatePreview(side) {
+        const sym   = SYMBOL_VAL;
+        const label = sym === 'BTCUSDT' ? 'BTC' : sym === 'ETHUSDT' ? 'ETH' : sym.replace('USDT','');
         const price = parseFloat(document.getElementById(side+'_price').value);
         if (!price || price <= 0) {
           ['tp','sl','qty','notional'].forEach(k => document.getElementById(side+'_'+k).textContent = '—');
           return;
         }
-        const qty = (AMOUNT * LEVERAGE) / price;
+        const qty = (AMOUNT * LEVERAGE_VAL) / price;
         const tp  = side === 'buy' ? price + TP_OFFSET : price - TP_OFFSET;
         const sl  = side === 'buy' ? price - SL_OFFSET : price + SL_OFFSET;
         document.getElementById(side+'_tp').textContent       = '$' + fmt(tp);
         document.getElementById(side+'_sl').textContent       = '$' + fmt(sl);
-        document.getElementById(side+'_qty').textContent      = qty.toFixed(5) + ' BTC';
+        document.getElementById(side+'_qty').textContent      = qty.toFixed(5) + ' ' + label;
         document.getElementById(side+'_notional').textContent = '$' + fmt(qty * price);
       }
 
-      /* ── AJAX order submission — no page reload ── */
+      // ── Order placement ───────────────────────────────────────
       async function placeOrder(side) {
-        if (_orderInProgress) return;  // prevent double-click
+        if (_orderInProgress) return;
 
         const priceEl = document.getElementById(side.toLowerCase() + '_price');
-
-        // Snapshot price immediately — before anything async or blocking
-        const price = parseFloat(priceEl.value);
+        const price   = parseFloat(priceEl.value);
         if (!price || price <= 0) {
           alert('Please enter a valid limit price.');
           return;
         }
-        const qty = (AMOUNT * LEVERAGE) / price;
+        const qty = (AMOUNT * LEVERAGE_VAL) / price;
         const tp  = side === 'BUY' ? price + TP_OFFSET : price - TP_OFFSET;
         const sl  = side === 'BUY' ? price - SL_OFFSET : price + SL_OFFSET;
 
-        // Lock ticker from touching inputs for entire order flow
         _orderInProgress = true;
 
         const ok = confirm(
-          `Confirm ${side} ORDER\n\n` +
-          `Symbol  : BTCUSDT\n` +
-          `Margin  : $${fmt(AMOUNT)} USDT\n` +
-          `Entry   : $${fmt(price)}\n` +
-          `Qty     : ${qty.toFixed(5)} BTC\n` +
-          `TP      : $${fmt(tp)}  (+${TP_OFFSET})\n` +
-          `SL      : $${fmt(sl)}  (-${SL_OFFSET})\n\nProceed?`
+          'Confirm ' + side + ' ORDER\n\n' +
+          'Symbol  : ' + SYMBOL_VAL + '\n' +
+          'Margin  : $' + fmt(AMOUNT) + ' USDT\n' +
+          'Entry   : $' + fmt(price) + '\n' +
+          'Qty     : ' + qty.toFixed(5) + '\n' +
+          'TP      : $' + fmt(tp) + '  (+' + TP_OFFSET + ')\n' +
+          'SL      : $' + fmt(sl) + '  (-' + SL_OFFSET + ')\n\nProceed?'
         );
 
         if (!ok) {
-          _orderInProgress = false;  // cancelled — release lock
+          _orderInProgress = false;
           return;
         }
 
-        // Brief visual feedback
         const activeBtn = document.getElementById('btn-' + side.toLowerCase());
         const origText  = activeBtn.textContent;
         activeBtn.textContent   = side === 'BUY' ? '▲ SENT...' : '▼ SENT...';
@@ -1260,6 +1247,8 @@
           margin:      AMOUNT,
           tp_offset:   TP_OFFSET,
           sl_offset:   SL_OFFSET,
+          symbol:      SYMBOL_VAL,
+          leverage:    LEVERAGE_VAL,
         });
 
         try {
@@ -1267,14 +1256,14 @@
           const data = await res.json();
           if (data.status === 'started') {
             appendLine({ ts: now(), level: 'SUCCESS',
-              msg: `▶ ${side} order sent @ $${fmt(price)} | TP:$${fmt(tp)} SL:$${fmt(sl)}` });
+              msg: '▶ ' + side + ' order sent @ $' + fmt(price) + ' | TP:$' + fmt(tp) + ' SL:$' + fmt(sl) });
           }
         } catch(e) {
           appendLine({ ts: now(), level: 'ERROR', msg: 'Failed to send order: ' + e });
           activeBtn.textContent   = origText;
           activeBtn.style.opacity = '1';
         } finally {
-          _orderInProgress = false;  // always release lock after fetch completes
+          _orderInProgress = false;
         }
       }
 
@@ -1282,7 +1271,7 @@
         return new Date().toTimeString().slice(0,8);
       }
 
-      /* ── Terminal ── */
+      // ── Terminal ──────────────────────────────────────────────
       function clearTerminal() {
         terminal.innerHTML = '<div class="terminal-empty" id="empty-msg">Terminal cleared.<span class="terminal-caret"></span></div>';
       }
@@ -1291,14 +1280,13 @@
         const emptyMsg = document.getElementById('empty-msg');
         if (emptyMsg) emptyMsg.remove();
         const line = document.createElement('div');
-        line.className = `log-line lvl-${entry.level}`;
+        line.className = 'log-line lvl-' + entry.level;
         line.innerHTML =
-          `<span class="log-ts">${entry.ts}</span>` +
-          `<span class="log-lvl lvl-${entry.level}">${entry.level}</span>` +
-          `<span class="log-msg">${escHtml(entry.msg)}</span>`;
+          '<span class="log-ts">'  + entry.ts    + '</span>' +
+          '<span class="log-lvl lvl-' + entry.level + '">' + entry.level + '</span>' +
+          '<span class="log-msg">' + escHtml(entry.msg) + '</span>';
         terminal.appendChild(line);
         while (terminal.children.length > 200) terminal.removeChild(terminal.firstChild);
-        // Always scroll to bottom instantly when new log arrives
         terminal.scrollTop = terminal.scrollHeight;
       }
 
@@ -1326,21 +1314,23 @@
       connectSSE();
       terminal.scrollTop = terminal.scrollHeight;
 
-      /* ── Live price ticker ── */
-      let _currentPrice   = 0;
-      let _livePriceOn    = true;   // controlled by checkbox
-      let _orderInProgress = false; // hard block during order flow
+      // ── Live price ticker ─────────────────────────────────────
+      let _currentPrice    = 0;
+      let _livePriceOn     = true;
+      let _orderInProgress = false;
+      let _tickerTimer     = null;
 
       function setLiveUI(on) {
         const dot = document.getElementById('live-dot');
         const val = document.getElementById('live-price-val');
-        const lbl = document.getElementById('live-label');
         const chk = document.getElementById('chk-live');
         chk.checked = on;
         if (on) {
-          dot.classList.remove('off'); val.classList.remove('off'); lbl.style.color = '';
+          dot.classList.remove('off');
+          val.classList.remove('off');
         } else {
-          dot.classList.add('off');    val.classList.add('off');    lbl.style.color = 'var(--muted)';
+          dot.classList.add('off');
+          val.classList.add('off');
         }
       }
 
@@ -1352,16 +1342,19 @@
       }
 
       async function fetchTicker() {
+        // Cancel any pending timer so we don't get two loops running after symbol change
+        if (_tickerTimer) { clearTimeout(_tickerTimer); _tickerTimer = null; }
         try {
-          const res  = await fetch('/ticker');
+          const sym  = document.getElementById('meta-symbol').value || SYMBOL_VAL;
+          const res  = await fetch('/ticker?symbol=' + sym);
           const data = await res.json();
           if (!data.price || data.price <= 0) return;
           _currentPrice = data.price;
           const f = data.price.toFixed(2);
 
           document.getElementById('live-price-val').textContent = '$' + f;
+          document.title= f;
 
-          // Hard block: never touch inputs while order confirm or fetch is in progress
           if (!_livePriceOn || _orderInProgress) return;
 
           const buyEl  = document.getElementById('buy_price');
@@ -1373,14 +1366,10 @@
           updatePreview('buy');
           updatePreview('sell');
         } catch(_) {}
-        // Reschedule — recursive setTimeout is safer than setInterval over long sessions
-        setTimeout(fetchTicker, 1000);
+        _tickerTimer = setTimeout(fetchTicker, 1000);
       }
 
-      // Kick off ticker (no setInterval — uses recursive setTimeout)
-      setTimeout(fetchTicker, 100);
-
-      /* ── Ctrl+Space shortcut → toggle live price ── */
+      // ── Ctrl+Space → toggle live price ───────────────────────
       document.addEventListener('keydown', (e) => {
         if (e.ctrlKey && e.code === 'Space') {
           e.preventDefault();
@@ -1389,7 +1378,7 @@
         }
       });
 
-      /* ── Open Orders ── */
+      // ── Open Orders ───────────────────────────────────────────
       async function loadOrders() {
         const btn = document.getElementById('btn-refresh');
         btn.classList.add('spinning');
@@ -1399,7 +1388,7 @@
           const data = await res.json();
           renderOrders(data.regular || [], data.algo || []);
         } catch(e) {
-          // keep last known data on timeout/error
+          // keep last known data
         } finally {
           btn.classList.remove('spinning');
           btn.disabled = false;
@@ -1412,30 +1401,29 @@
 
         if (total === 0) {
           document.getElementById('orders-body').innerHTML =
-            '<div class="orders-empty">No open orders for ' + '{{ cfg_symbol }}' + '</div>';
+            '<div class="orders-empty">No open orders for ' + SYMBOL_VAL + '</div>';
           return;
         }
 
         let rows = '';
-
         regular.forEach(o => {
-          const side    = o.side || '—';
+          const side      = o.side || '—';
           const sideClass = side === 'BUY' ? 'side-buy' : 'side-sell';
-          const status  = o.status || '—';
-          const price   = parseFloat(o.price || 0).toFixed(2);
-          const qty     = parseFloat(o.origQty || 0).toFixed(4);
-          const filled  = parseFloat(o.executedQty || 0).toFixed(4);
-          const type    = o.type || '—';
-          rows += `<tr>
-            <td><span class="${sideClass}">${side}</span></td>
-            <td><span class="type-badge">${type}</span></td>
-            <td>$${price}</td>
-            <td>${qty}</td>
-            <td>${filled}</td>
-            <td>${status}</td>
-            <td>#${o.orderId}</td>
-            <td><button class="btn-cancel" onclick="cancelOrder('${o.orderId}','regular',this)">✕ CANCEL</button></td>
-          </tr>`;
+          const price     = parseFloat(o.price || 0).toFixed(2);
+          const qty       = parseFloat(o.origQty || 0).toFixed(4);
+          const filled    = parseFloat(o.executedQty || 0).toFixed(4);
+          const type      = o.type || '—';
+          const status    = o.status || '—';
+          rows += '<tr>' +
+            '<td><span class="' + sideClass + '">' + side + '</span></td>' +
+            '<td><span class="type-badge">' + type + '</span></td>' +
+            '<td>$' + price + '</td>' +
+            '<td>' + qty + '</td>' +
+            '<td>' + filled + '</td>' +
+            '<td>' + status + '</td>' +
+            '<td>#' + o.orderId + '</td>' +
+            '<td><button class="btn-cancel" onclick="cancelOrder(\'' + o.orderId + '\',\'regular\',this)">✕ CANCEL</button></td>' +
+            '</tr>';
         });
 
         algo.forEach(o => {
@@ -1446,28 +1434,23 @@
           const qty       = parseFloat(o.quantity || 0).toFixed(4);
           const type      = o.orderType || o.type || '—';
           const status    = o.algoStatus || '—';
-          rows += `<tr>
-            <td><span class="${sideClass}">${side}</span></td>
-            <td><span class="type-badge algo">${type}</span></td>
-            <td>$${price} <span style="color:var(--muted);font-size:10px">trig:$${trigger}</span></td>
-            <td>${qty}</td>
-            <td>—</td>
-            <td>${status}</td>
-            <td>algo#${o.algoId}</td>
-            <td><button class="btn-cancel" onclick="cancelOrder('${o.algoId}','algo',this)">✕ CANCEL</button></td>
-          </tr>`;
+          rows += '<tr>' +
+            '<td><span class="' + sideClass + '">' + side + '</span></td>' +
+            '<td><span class="type-badge algo">' + type + '</span></td>' +
+            '<td>$' + price + ' <span style="color:var(--muted);font-size:10px">trig:$' + trigger + '</span></td>' +
+            '<td>' + qty + '</td>' +
+            '<td>—</td>' +
+            '<td>' + status + '</td>' +
+            '<td>algo#' + o.algoId + '</td>' +
+            '<td><button class="btn-cancel" onclick="cancelOrder(\'' + o.algoId + '\',\'algo\',this)">✕ CANCEL</button></td>' +
+            '</tr>';
         });
 
-        document.getElementById('orders-body').innerHTML = `
-          <div class="orders-table-wrap">
-            <table class="orders-table">
-              <thead><tr>
-                <th>SIDE</th><th>TYPE</th><th>PRICE</th>
-                <th>QTY</th><th>FILLED</th><th>STATUS</th><th>ID</th><th></th>
-              </tr></thead>
-              <tbody>${rows}</tbody>
-            </table>
-          </div>`;
+        document.getElementById('orders-body').innerHTML =
+          '<div class="orders-table-wrap">' +
+          '<table class="orders-table"><thead><tr>' +
+          '<th>SIDE</th><th>TYPE</th><th>PRICE</th><th>QTY</th><th>FILLED</th><th>STATUS</th><th>ID</th><th></th>' +
+          '</tr></thead><tbody>' + rows + '</tbody></table></div>';
       }
 
       async function cancelOrder(orderId, type, btn) {
@@ -1493,8 +1476,7 @@
         }
       }
 
-
-      /* ── Open Positions ── */
+      // ── Open Positions ────────────────────────────────────────
       async function loadPositions() {
         const btn = document.getElementById('btn-refresh-pos');
         btn.classList.add('spinning');
@@ -1503,9 +1485,8 @@
           const res  = await fetch('/open-positions');
           const data = await res.json();
           if (!data.timeout) renderPositions(data.positions || []);
-          // On timeout: keep showing last known data
         } catch(e) {
-          // keep last known data on timeout/error
+          // keep last known data
         } finally {
           btn.classList.remove('spinning');
           btn.disabled = false;
@@ -1517,7 +1498,7 @@
 
         if (positions.length === 0) {
           document.getElementById('positions-body').innerHTML =
-            '<div class="orders-empty">No open positions for {{ cfg_symbol }}</div>';
+            '<div class="orders-empty">No open positions for ' + SYMBOL_VAL + '</div>';
           return;
         }
 
@@ -1535,41 +1516,30 @@
           const pnlClass  = pnl >= 0 ? 'pnl-pos' : 'pnl-neg';
           const pnlSign   = pnl >= 0 ? '+' : '';
           const leverage  = p.leverage || '—';
-          const symbol    = p.symbol   || '{{ cfg_symbol }}';
+          const symbol    = p.symbol   || SYMBOL_VAL;
+          const posSide   = p.positionSide || (amt > 0 ? 'LONG' : 'SHORT');
 
-          const posSide = p.positionSide || (amt > 0 ? 'LONG' : 'SHORT');
-          rows += `<tr>
-            <td><span class="${sideClass}">${sideLabel}<br><span style="font-size:9px;opacity:.6">${posSide}</span></span></td>
-            <td>${symbol}</td>
-            <td>${leverage}×</td>
-            <td>${absAmt} BTC</td>
-            <td>$${entry}</td>
-            <td>$${mark}</td>
-            <td>$${liq}</td>
-            <td class="${pnlClass}">${pnlSign}$${pnl.toFixed(2)}</td>
-            <td>
-              <button class="btn-close-pos"
-                onclick="closePosition('${symbol}','${side}','${absAmt}','${posSide}',this)">
-                ⚡ CLOSE
-              </button>
-            </td>
-          </tr>`;
+          rows += '<tr>' +
+            '<td><span class="' + sideClass + '">' + sideLabel + '<br><span style="font-size:9px;opacity:.6">' + posSide + '</span></span></td>' +
+            '<td>' + symbol + '</td>' +
+            '<td>' + leverage + '×</td>' +
+            '<td>' + absAmt + '</td>' +
+            '<td>$' + entry + '</td>' +
+            '<td>$' + mark + '</td>' +
+            '<td>$' + liq + '</td>' +
+            '<td class="' + pnlClass + '">' + pnlSign + '$' + pnl.toFixed(2) + '</td>' +
+            '<td><button class="btn-close-pos" onclick="closePosition(\'' + symbol + '\',\'' + side + '\',\'' + absAmt + '\',\'' + posSide + '\',this)">⚡ CLOSE</button></td>' +
+            '</tr>';
         });
 
-        document.getElementById('positions-body').innerHTML = `
-          <div class="pos-table-wrap">
-            <table class="pos-table">
-              <thead><tr>
-                <th>SIDE</th><th>SYMBOL</th><th>LEV</th><th>SIZE</th>
-                <th>ENTRY</th><th>MARK</th><th>LIQ</th><th>UNREAL PNL</th><th></th>
-              </tr></thead>
-              <tbody>${rows}</tbody>
-            </table>
-          </div>`;
+        document.getElementById('positions-body').innerHTML =
+          '<div class="pos-table-wrap"><table class="pos-table"><thead><tr>' +
+          '<th>SIDE</th><th>SYMBOL</th><th>LEV</th><th>SIZE</th><th>ENTRY</th><th>MARK</th><th>LIQ</th><th>UNREAL PNL</th><th></th>' +
+          '</tr></thead><tbody>' + rows + '</tbody></table></div>';
       }
 
       async function closePosition(symbol, side, quantity, positionSide, btn) {
-        if (!confirm(`MARKET CLOSE ${positionSide} ${quantity} ${symbol}?\n\nThis will close the position immediately at market price.`)) return;
+        if (!confirm('MARKET CLOSE ' + positionSide + ' ' + quantity + ' ' + symbol + '?\n\nThis will close the position immediately at market price.')) return;
         btn.disabled = true;
         btn.textContent = 'CLOSING...';
         const body = new URLSearchParams({ symbol, side, quantity, position_side: positionSide });
@@ -1591,12 +1561,12 @@
         }
       }
 
+      // ── Init ──────────────────────────────────────────────────
       loadPositions();
-      setInterval(loadPositions, 5000);  // 5s — data comes from server cache
-
-      // Load orders on page load and after placing an order
       loadOrders();
-      setInterval(loadOrders, 5000);    // 5s — data comes from server cache
+      setInterval(loadPositions, 5000);
+      setInterval(loadOrders,    5000);
+      setTimeout(fetchTicker, 100);
     </script>
   </body>
 </html>
