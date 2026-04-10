@@ -320,12 +320,13 @@ async def open_orders():
     regular = []
     algo    = []
     try:
-        r = signed_request(client, "GET", "/fapi/v1/openOrders", {"symbol": SYMBOL})
+        # r = signed_request(client, "GET", "/fapi/v1/openOrders", {"symbol": SYMBOL})
+        r = signed_request(client, "GET", "/fapi/v1/openOrders", {})
         regular = r if isinstance(r, list) else []
     except Exception as e:
         push_log("ERROR", f"Failed to fetch regular orders: {e}")
     try:
-        ar = signed_request(client, "GET", "/fapi/v1/openAlgoOrders", {"symbol": SYMBOL})
+        ar = signed_request(client, "GET", "/fapi/v1/openAlgoOrders", {})
         if isinstance(ar, dict):
             algo = ar.get("orders") or ar.get("algoOrders") or ar.get("data") or []
         elif isinstance(ar, list):
@@ -353,7 +354,7 @@ async def cancel_order(order_id: str = Form(...), order_type: str = Form(default
 async def open_positions():
     client = get_client()
     try:
-        positions = signed_request(client, "GET", "/fapi/v2/positionRisk", {"symbol": SYMBOL})
+        positions = signed_request(client, "GET", "/fapi/v2/positionRisk", {})
         # Hedge mode: filter both LONG and SHORT positions with non-zero size
         open_pos = [p for p in (positions if isinstance(positions, list) else [])
                     if abs(float(p.get("positionAmt", 0))) > 0]
