@@ -127,8 +127,10 @@ __pycache__/
 ```bash
 Invoke-RestMethod -Uri https://api.ipify.org
 
+pip install -r requirements.txt
 cd C:\Users
 python -m uvicorn main:app --reload
+
 ```
 
 ---

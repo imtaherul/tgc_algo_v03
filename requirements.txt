@@ -1,5 +1,8 @@
 fastapi
 uvicorn[standard]
-binance-connector
 jinja2
 python-multipart
+binance-connector
+python-binance 
+binance 
+binance-futures-connector
